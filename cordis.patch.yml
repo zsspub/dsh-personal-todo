@@ -1,0 +1,12 @@
+- insert:
+    - id: personal-todo
+      name: dsh-personal-todo
+      config:
+        databasePath: !!js dshHomePath('personal-todo/todos.sqlite3')
+        journalMode: wal
+        busyTimeoutMs: 5000
+        defaultListLimit: 50
+        maxListLimit: 200
+
+    - id: personal-todo-tools
+      name: dsh-personal-todo/tools
