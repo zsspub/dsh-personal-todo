@@ -15,6 +15,7 @@ English | [中文](README.zh.md)
 
 - Durable SQLite storage with schema versioning, WAL, foreign keys, a busy timeout, and owner-only filesystem permissions.
 - One durable root Session per started todo, reused for blocked replies and review changes.
+- Automatic discovery of delegated child Sessions, including nested children, as related todo conversations.
 - Explicit `pending`, `in_progress`, `blocked`, `in_review`, `completed`, and `cancelled` task states; only user approval completes a task.
 - Durable run, Session-link, and activity history alongside the current todo snapshot.
 - Agent tools for creation, query, editing, progress, blocking questions, review submission, and deletion.
@@ -59,7 +60,7 @@ Lists show every active workflow state by default. Pass `statuses: ["completed"]
 
 ## Task flow
 
-Creating a todo in the Web task center starts it immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
+Creating a todo in the Web task center starts it immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. The Agent may use the deployment's `delegate` tool or an equivalent subagent tool for independent workstreams; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
 
 ## Configuration
 
@@ -80,7 +81,7 @@ Override the generated plugin entry in the profile patch when deployment policy 
 
 Titles are trimmed and limited to 200 characters. Notes are trimmed and limited to 10,000 characters. A todo accepts up to 20 unique lowercase tags of at most 32 characters each. Due times must be RFC 3339 timestamps and are returned in canonical UTC form.
 
-Approving a todo sets `completedAt`. Completed records and their run, Session-link, and activity history remain until an explicit delete. Active ordering surfaces review and blocked items before running and pending work. Version-one databases migrate in place to the task-driven schema on first load.
+Approving a todo sets `completedAt`. Completed records and their run, Session-link, and activity history remain until an explicit delete. Active ordering surfaces review and blocked items before running and pending work. Older databases migrate in place to the current task and related-conversation schema on first load.
 
 ## Development
 

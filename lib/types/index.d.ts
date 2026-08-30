@@ -13,6 +13,15 @@ declare module '@deepseek-ai/cordis' {
         personalTodo: PersonalTodoService;
         sessionController: TodoSessionController;
     }
+    interface Events {
+        /** @mode emit */
+        'session/created'(session: {
+            readonly id: string;
+            readonly header: {
+                readonly parentSession?: string;
+            };
+        }): void;
+    }
 }
 /** Deployment configuration for the personal todo database and list bounds. */
 export interface Config {

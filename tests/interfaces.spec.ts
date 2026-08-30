@@ -46,6 +46,12 @@ class SessionControllerStub extends Service {
   }
 }
 
+class SessionsStub extends Service {
+  constructor(ctx: Context) {
+    super(ctx, 'sessions')
+  }
+}
+
 const contexts: Context[] = []
 const signal = new AbortController().signal
 
@@ -53,6 +59,7 @@ async function setup() {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(SessionControllerStub)
+  await ctx.plugin(SessionsStub)
   await ctx.plugin(PersonalTodoService, {
     databasePath: ':memory:',
     defaultListLimit: 50,
@@ -119,6 +126,7 @@ describe('Host Remote service and Agent tools', () => {
     expect(started).toMatchObject({ status: 'in_progress', primarySessionId: expect.any(String) })
     expect(sessions.created).toEqual([started.primarySessionId])
     expect(sessions.messages[0]?.text).toContain(`personal_todo_submit_review with id ${added.id}`)
+    expect(sessions.messages[0]?.text).toContain('delegate tool')
 
     const agentRun = run(started.primarySessionId as string)
     expect(await tools.get('personal_todo_progress')?.execute({ id: added.id, message: 'Implemented it' }, agentRun)).toMatchObject({ latestSummary: 'Implemented it' })
@@ -134,6 +142,26 @@ describe('Host Remote service and Agent tools', () => {
     const listed = await tools.get('personal_todo_list')?.execute({ statuses: ['completed'] } satisfies ListTodoInput, run())
     expect(listed).toMatchObject({ total: 1, counts: { completed: 1 }, todos: [{ id: added.id }] })
     expect(tools.get('personal_todo_list')?.output.render({}, listed)[0]?.text).toContain(added.id)
+  })
+
+  it('tracks newly published child Sessions as related todo conversations', async () => {
+    const { ctx } = await setup()
+    const todo = await ctx.personalTodo.create({ title: 'Delegate work' }, signal)
+    const started = await ctx.personalTodo.start({ id: todo.id }, signal)
+    ctx.emit('session/created', {
+      id: 'child-1',
+      header: { parentSession: started.primarySessionId },
+    } as never)
+    ctx.emit('session/created', {
+      id: 'grandchild-1',
+      header: { parentSession: 'child-1' },
+    } as never)
+
+    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).sessions).toMatchObject([
+      { sessionId: started.primarySessionId, role: 'primary', parentSessionId: null },
+      { sessionId: 'child-1', role: 'related', parentSessionId: started.primarySessionId },
+      { sessionId: 'grandchild-1', role: 'related', parentSessionId: 'child-1' },
+    ])
   })
 
   it('surfaces an Agent question in the todo and delivers the user reply to the same Session', async () => {

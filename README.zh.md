@@ -15,6 +15,7 @@ read_when:
 
 - 使用 schema 版本、WAL、foreign keys、busy timeout 和仅限所有者的文件权限实现持久 SQLite 存储。
 - 每个启动的待办拥有一个持久主会话，阻塞回复和审核修改复用该会话。
+- 自动识别 Agent 委派的子 Session，并将嵌套子会话作为待办的相关对话保存。
 - 使用 `pending`、`in_progress`、`blocked`、`in_review`、`completed` 和 `cancelled` 状态；只有用户审核能完成任务。
 - 在当前待办快照之外持久保存 Run、Session 关联和活动记录。
 - 提供创建、查询、编辑、进度、阻塞提问、提交审核和删除 Agent 工具。
@@ -59,7 +60,7 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 
 ## 任务流程
 
-在 Web 任务中心创建待办会立即开始执行。启动任意待处理待办会创建或接管一个确定的普通 Session，并把任务说明发送给 Agent。Agent 可以记录进度，在缺少输入时提交明确问题，并把结果流转到 `in_review`。审核通过后进入 `completed`；提出修改意见会在同一个主会话中创建新的 Run，并返回 `in_progress`。
+在 Web 任务中心创建待办会立即开始执行。启动任意待处理待办会创建或接管一个确定的普通 Session，并把任务说明发送给 Agent。Agent 可以使用部署提供的 `delegate` 或等价 subagent 工具拆分独立工作；DSH 发布子 Session 时，插件会把该子会话及其嵌套后代关联到待办。Agent 可以记录进度，在缺少输入时提交明确问题，并把结果流转到 `in_review`。审核通过后进入 `completed`；提出修改意见会在同一个主会话中创建新的 Run，并返回 `in_progress`。
 
 ## 配置
 
@@ -80,7 +81,7 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 
 标题会去除首尾空白，最多 200 个字符。备注会去除首尾空白，最多 10,000 个字符。每条待办最多包含 20 个唯一的小写标签，每个标签最多 32 个字符。截止时间必须是 RFC 3339 时间，并以规范 UTC 格式返回。
 
-审核通过会设置 `completedAt`。完成记录及其 Run、Session 关联和活动历史会一直保留，直到显式删除。活动列表优先显示待审核和等待回复的任务，再显示执行中和待处理任务。版本一数据库会在首次加载时原地迁移到任务驱动 schema。
+审核通过会设置 `completedAt`。完成记录及其 Run、Session 关联和活动历史会一直保留，直到显式删除。活动列表优先显示待审核和等待回复的任务，再显示执行中和待处理任务。旧数据库会在首次加载时原地迁移到当前的任务及相关对话 schema。
 
 ## 开发
 

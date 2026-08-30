@@ -3,6 +3,7 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import type { ISessions, SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import personalTodoRemote from 'dsh-personal-todo/remote'
@@ -22,10 +23,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 export const inject = ['slots', 'locale', 'remote', 'sessions']
 
-interface SessionNavigation {
-  readonly sessions: { open(id: string): void }
-}
-
 function remoteFailure(result: { readonly error: { readonly message: string; readonly code: string } }): Error {
   return new Error(`${result.error.message} (${result.error.code})`)
 }
@@ -35,7 +32,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'personal-todo: dictionaries')
   const disposeRemote = await ctx.remote.$mount(personalTodoRemote)
   const uiFiber = ctx.inject(['remote.personalTodo'], (scope: ClientContext) => {
-    const navigation = scope as ClientContext & SessionNavigation
+    const sessions = (scope as unknown as { readonly sessions: ISessions }).sessions
     scope.slots.inject('sidebar.footer.action', () => scope.slots.register({
       name: 'sidebar.footer.action',
       id: 'personal-todo',
@@ -87,7 +84,26 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
           if (!result.ok) throw remoteFailure(result)
           return result.value
         },
-        openSession: (id) => { navigation.sessions.open(id) },
+        openSession: async (id, parentId) => {
+          const sessionId = id as SessionId
+          if (parentId === null) {
+            sessions.open(sessionId)
+            return true
+          }
+          const retained = sessions.subagentAddress(sessionId)
+          if (retained !== undefined) {
+            sessions.openSubagent(retained)
+            return true
+          }
+          const parentSessionId = parentId as SessionId
+          sessions.open(parentSessionId)
+          await sessions.refreshSubagents(parentSessionId)
+          const child = sessions.list.getSnapshot().subagentsByParent[parentSessionId]?.entries
+            .find(entry => entry.kind === 'child' && entry.id === sessionId)
+          if (child?.kind !== 'child') return false
+          sessions.openSubagent({ parentSessionId, childSessionId: sessionId, mode: child.mode } satisfies SubagentAddress)
+          return true
+        },
       }),
     }, PersonalTodoPanel))
   })

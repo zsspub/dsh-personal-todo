@@ -12,7 +12,7 @@ export interface PersonalTodoPanelInjected {
     readonly approve: (id: string, signal: AbortSignal) => Promise<Todo>;
     readonly requestChanges: (request: RequestTodoChangesRequest, signal: AbortSignal) => Promise<Todo>;
     readonly delete: (id: string, signal: AbortSignal) => Promise<DeleteTodoResult>;
-    readonly openSession: (id: string) => void;
+    readonly openSession: (id: string, parentSessionId: string | null) => Promise<boolean>;
 }
 export type PersonalTodoPanelProps = PropsRuntime<'sidebar.footer.action'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected;
 /** Sidebar action and task-driven personal todo center. */

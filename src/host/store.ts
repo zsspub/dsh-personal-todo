@@ -12,7 +12,7 @@ import type {
 } from '../types.ts'
 import { TODO_PRIORITIES, TODO_STATUSES } from '../types.ts'
 
-export const PERSONAL_TODO_SCHEMA_VERSION = 2
+export const PERSONAL_TODO_SCHEMA_VERSION = 3
 
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 
@@ -64,7 +64,7 @@ interface TodoRunRow {
 interface TodoSessionRow {
   readonly todo_id: string
   readonly session_id: string
-  readonly role: 'primary'
+  readonly role: 'primary' | 'related'
   readonly parent_session_id: string | null
   readonly created_at: number
 }
@@ -218,6 +218,7 @@ export class TodoStore {
     }
     if (row.user_version === 0) this.createSchema()
     else if (row.user_version === 1) this.migrateV1()
+    else if (row.user_version === 2) this.migrateV2()
   }
 
   private createSchema(): void {
@@ -261,7 +262,7 @@ export class TodoStore {
         CREATE TABLE todo_sessions (
           todo_id           TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
           session_id        TEXT NOT NULL UNIQUE,
-          role              TEXT NOT NULL CHECK (role = 'primary'),
+          role              TEXT NOT NULL CHECK (role IN ('primary', 'related')),
           parent_session_id TEXT,
           created_at        INTEGER NOT NULL,
           PRIMARY KEY (todo_id, session_id)
@@ -279,7 +280,7 @@ export class TodoStore {
         CREATE INDEX todo_tags_tag_idx ON todo_tags(tag, todo_id);
         CREATE INDEX todo_runs_todo_idx ON todo_runs(todo_id, sequence DESC);
         CREATE INDEX todo_events_todo_idx ON todo_events(todo_id, created_at DESC);
-        PRAGMA user_version = 2;
+        PRAGMA user_version = 3;
       `)
     })
   }
@@ -325,7 +326,7 @@ export class TodoStore {
           ) STRICT;
           CREATE TABLE todo_sessions (
             todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE, session_id TEXT NOT NULL UNIQUE,
-            role TEXT NOT NULL CHECK (role = 'primary'), parent_session_id TEXT, created_at INTEGER NOT NULL,
+            role TEXT NOT NULL CHECK (role IN ('primary', 'related')), parent_session_id TEXT, created_at INTEGER NOT NULL,
             PRIMARY KEY (todo_id, session_id)
           ) STRICT;
           CREATE TABLE todo_events (
@@ -343,7 +344,28 @@ export class TodoStore {
           CREATE INDEX todo_tags_tag_idx ON todo_tags(tag, todo_id);
           CREATE INDEX todo_runs_todo_idx ON todo_runs(todo_id, sequence DESC);
           CREATE INDEX todo_events_todo_idx ON todo_events(todo_id, created_at DESC);
-          PRAGMA user_version = 2;
+          PRAGMA user_version = 3;
+        `)
+      })
+    } finally {
+      this.database.exec('PRAGMA foreign_keys = ON')
+    }
+  }
+
+  private migrateV2(): void {
+    this.database.exec('PRAGMA foreign_keys = OFF')
+    try {
+      this.transaction(() => {
+        this.database.exec(`
+          ALTER TABLE todo_sessions RENAME TO todo_sessions_v2;
+          CREATE TABLE todo_sessions (
+            todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE, session_id TEXT NOT NULL UNIQUE,
+            role TEXT NOT NULL CHECK (role IN ('primary', 'related')), parent_session_id TEXT, created_at INTEGER NOT NULL,
+            PRIMARY KEY (todo_id, session_id)
+          ) STRICT;
+          INSERT INTO todo_sessions SELECT todo_id, session_id, role, parent_session_id, created_at FROM todo_sessions_v2;
+          DROP TABLE todo_sessions_v2;
+          PRAGMA user_version = 3;
         `)
       })
     } finally {
@@ -490,7 +512,8 @@ export class TodoStore {
     `).all(id) as unknown as TodoRunRow[]
     const sessions = this.database.prepare(`
       SELECT todo_id, session_id, role, parent_session_id, created_at
-      FROM todo_sessions WHERE todo_id = ? ORDER BY created_at ASC
+      FROM todo_sessions WHERE todo_id = ?
+      ORDER BY CASE role WHEN 'primary' THEN 0 ELSE 1 END, created_at ASC, session_id ASC
     `).all(id) as unknown as TodoSessionRow[]
     const events = this.database.prepare(`
       SELECT id, todo_id, run_id, type, message, created_at
@@ -602,6 +625,39 @@ export class TodoStore {
       this.appendEvent(id, runId, 'run_started', null, timestamp)
     })
     return this.get(id)
+  }
+
+  /** Attach one child Session when its direct parent already belongs to a todo. */
+  linkRelatedSession(parentSessionId: string, sessionId: string): TodoSession | undefined {
+    this.assertOpen()
+    const parent = this.database.prepare(`
+      SELECT todo_id, session_id, role, parent_session_id, created_at
+      FROM todo_sessions WHERE session_id = ?
+    `).get(parentSessionId) as TodoSessionRow | undefined
+    if (parent === undefined) return undefined
+    const existing = this.database.prepare(`
+      SELECT todo_id, session_id, role, parent_session_id, created_at
+      FROM todo_sessions WHERE session_id = ?
+    `).get(sessionId) as TodoSessionRow | undefined
+    if (existing !== undefined) {
+      if (existing.todo_id !== parent.todo_id || existing.parent_session_id !== parentSessionId) {
+        throw new PersonalTodoError(`session ${JSON.stringify(sessionId)} is already linked to another todo conversation`)
+      }
+      return this.sessionFromRow(existing)
+    }
+    const timestamp = this.now()
+    const row: TodoSessionRow = {
+      todo_id: parent.todo_id,
+      session_id: sessionId,
+      role: 'related',
+      parent_session_id: parentSessionId,
+      created_at: timestamp,
+    }
+    this.database.prepare(`
+      INSERT INTO todo_sessions (todo_id, session_id, role, parent_session_id, created_at)
+      VALUES (?, ?, 'related', ?, ?)
+    `).run(row.todo_id, row.session_id, row.parent_session_id, row.created_at)
+    return this.sessionFromRow(row)
   }
 
   /** Return a failed initial dispatch to pending while retaining its audit record. */

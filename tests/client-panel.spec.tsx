@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PersonalTodoPanel, type PersonalTodoPanelInjected } from '../src/client/PersonalTodoPanel.tsx'
 import { en, zh } from '../src/client/locales.ts'
 import type {
-  CreateTodoInput, ListTodoInput, Todo, TodoCounts, TodoDetail, TodoListResult, UpdateTodoRequest,
+  CreateTodoInput, ListTodoInput, Todo, TodoCounts, TodoDetail, TodoListResult, TodoSession, UpdateTodoRequest,
 } from '../src/types.ts'
 
 vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => {
@@ -171,7 +171,7 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
       rows.splice(index, 1)
       return { id, deleted: true as const }
     }),
-    openSession: vi.fn(),
+    openSession: vi.fn(async () => true),
   }
 }
 
@@ -227,8 +227,35 @@ describe('PersonalTodoPanel', () => {
     await user.click(screen.getByRole('button', { name: /Write browser tests/ }))
     expect(await screen.findByText('Primary execution conversation')).toBeTruthy()
     await user.click(screen.getAllByRole('button', { name: 'Open conversation' })[0] as HTMLElement)
-    expect(service.openSession).toHaveBeenCalledWith('session-todo-1')
+    expect(service.openSession).toHaveBeenCalledWith('session-todo-1', null)
     expect(screen.queryByRole('dialog', { name: 'Personal Todos' })).toBeNull()
+  })
+
+  it('lists and opens Agent-created related conversations', async () => {
+    const user = userEvent.setup()
+    const row = todo({ status: 'in_review', primarySessionId: 'session-1', activeRunId: 'run-1', reviewRound: 1 })
+    const base = api([row])
+    const service: PersonalTodoPanelInjected = {
+      ...base,
+      get: vi.fn(async (_id, signal) => {
+        signal.throwIfAborted()
+        return {
+          ...detail(row),
+          sessions: [
+            { todoId: row.id, sessionId: 'session-1', role: 'primary', parentSessionId: null, createdAt: row.createdAt },
+            { todoId: row.id, sessionId: 'child-1', role: 'related', parentSessionId: 'session-1', createdAt: row.updatedAt },
+          ] satisfies TodoSession[],
+        }
+      }),
+    }
+    render(<PersonalTodoPanel {...panelProps(service)} />)
+
+    await user.click(screen.getByRole('button', { name: 'Open personal todos' }))
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    expect(await screen.findByText('Primary execution conversation')).toBeTruthy()
+    expect(await screen.findByText('Related work conversation 1')).toBeTruthy()
+    await user.click(screen.getAllByRole('button', { name: 'Open conversation' })[2] as HTMLElement)
+    expect(service.openSession).toHaveBeenCalledWith('child-1', 'session-1')
   })
 
   it('surfaces blocked questions and resumes from an inline reply', async () => {

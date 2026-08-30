@@ -31,6 +31,7 @@ export declare const zh: {
     'state.emptyActive': string;
     'state.emptyCompleted': string;
     'state.error': string;
+    'state.sessionUnavailable': string;
     'field.title': string;
     'field.notes': string;
     'field.priority': string;
@@ -66,6 +67,7 @@ export declare const zh: {
     'review.verification': string;
     'review.risk': string;
     'session.primary': string;
+    'session.related': string;
     'event.created': string;
     'event.updated': string;
     'event.run_started': string;
@@ -114,6 +116,7 @@ export declare const en: {
     'state.emptyActive': string;
     'state.emptyCompleted': string;
     'state.error': string;
+    'state.sessionUnavailable': string;
     'field.title': string;
     'field.notes': string;
     'field.priority': string;
@@ -149,6 +152,7 @@ export declare const en: {
     'review.verification': string;
     'review.risk': string;
     'session.primary': string;
+    'session.related': string;
     'event.created': string;
     'event.updated': string;
     'event.run_started': string;

@@ -127,6 +127,29 @@ describe('TodoStore', () => {
     expect(detail.todo.reviewRound).toBe(2)
   })
 
+  it('links direct and nested Agent conversations to the owning todo', () => {
+    const todos = store({ ids: ['todo-1', 'todo-2'], times: [1000, 2000, 3000, 4000, 5000, 6000] })
+    const first = todos.create({ title: 'Delegated task' })
+    const second = todos.create({ title: 'Other task' })
+    todos.beginRun(first.id, 'run-1', 'root-1')
+    todos.beginRun(second.id, 'run-2', 'root-2')
+
+    expect(todos.linkRelatedSession('missing', 'ignored')).toBeUndefined()
+    expect(todos.linkRelatedSession('root-1', 'child-1')).toMatchObject({
+      todoId: first.id, sessionId: 'child-1', role: 'related', parentSessionId: 'root-1',
+    })
+    expect(todos.linkRelatedSession('child-1', 'grandchild-1')).toMatchObject({
+      todoId: first.id, sessionId: 'grandchild-1', role: 'related', parentSessionId: 'child-1',
+    })
+    expect(todos.linkRelatedSession('root-1', 'child-1')).toMatchObject({ sessionId: 'child-1' })
+    expect(() => todos.linkRelatedSession('root-2', 'child-1')).toThrow('already linked')
+    expect(todos.detail(first.id).sessions.map(session => [session.sessionId, session.role, session.parentSessionId])).toEqual([
+      ['root-1', 'primary', null],
+      ['child-1', 'related', 'root-1'],
+      ['grandchild-1', 'related', 'child-1'],
+    ])
+  })
+
   it('rejects invalid lifecycle transitions and Agent Sessions that do not own the todo', () => {
     const todos = store()
     const created = todos.create({ title: 'Owned task' })
@@ -204,6 +227,52 @@ describe('TodoStore', () => {
     const migrated = store({ databasePath })
     expect(migrated.get('old')).toMatchObject({ title: 'Existing todo', tags: ['legacy'], status: 'pending', revision: 0 })
     expect(migrated.detail('old').events).toMatchObject([{ type: 'created' }])
+  })
+
+  it('migrates version-two Session links to accept related conversations', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dsh-personal-todo-v2-'))
+    const databasePath = join(directory, 'todos.sqlite3')
+    const database = new DatabaseSync(databasePath)
+    database.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE todos (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, notes TEXT,
+        status TEXT NOT NULL, priority TEXT NOT NULL, due_at INTEGER,
+        primary_session_id TEXT, active_run_id TEXT, latest_summary TEXT, blocked_reason TEXT,
+        review_round INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER
+      ) STRICT;
+      CREATE TABLE todo_tags (
+        todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        tag TEXT NOT NULL, PRIMARY KEY (todo_id, tag)
+      ) STRICT;
+      CREATE TABLE todo_runs (
+        id TEXT PRIMARY KEY, todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        sequence INTEGER NOT NULL, status TEXT NOT NULL, root_session_id TEXT NOT NULL,
+        result_summary TEXT, verification TEXT, risk TEXT, started_at INTEGER NOT NULL,
+        finished_at INTEGER, UNIQUE (todo_id, sequence)
+      ) STRICT;
+      CREATE TABLE todo_sessions (
+        todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL UNIQUE, role TEXT NOT NULL CHECK (role = 'primary'),
+        parent_session_id TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (todo_id, session_id)
+      ) STRICT;
+      CREATE TABLE todo_events (
+        id TEXT PRIMARY KEY, todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        run_id TEXT REFERENCES todo_runs(id) ON DELETE CASCADE,
+        type TEXT NOT NULL, message TEXT, created_at INTEGER NOT NULL
+      ) STRICT;
+      INSERT INTO todos VALUES ('old', 'Existing task', NULL, 'in_progress', 'none', NULL, 'root', 'run', NULL, NULL, 0, 1, 1000, 1000, NULL);
+      INSERT INTO todo_runs VALUES ('run', 'old', 1, 'running', 'root', NULL, NULL, NULL, 1000, NULL);
+      INSERT INTO todo_sessions VALUES ('old', 'root', 'primary', NULL, 1000);
+      INSERT INTO todo_events VALUES ('created', 'old', NULL, 'created', NULL, 1000);
+      PRAGMA user_version = 2;
+    `)
+    database.close()
+
+    const migrated = store({ databasePath })
+    expect(migrated.linkRelatedSession('root', 'child')).toMatchObject({ role: 'related', parentSessionId: 'root' })
+    expect(migrated.detail('old').sessions).toHaveLength(2)
   })
 
   it('persists through reopen with an owner-only database and current schema version', () => {

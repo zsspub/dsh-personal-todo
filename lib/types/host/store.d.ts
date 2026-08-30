@@ -1,6 +1,6 @@
 /** SQLite owner for personal todo validation, ordering, and durable writes. */
-import type { BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoListResult, UpdateTodoPatch } from '../types.ts';
-export declare const PERSONAL_TODO_SCHEMA_VERSION = 2;
+import type { BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoListResult, TodoSession, UpdateTodoPatch } from '../types.ts';
+export declare const PERSONAL_TODO_SCHEMA_VERSION = 3;
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist';
 export interface TodoStoreConfig {
     readonly databasePath: string;
@@ -30,6 +30,7 @@ export declare class TodoStore {
     private initialize;
     private createSchema;
     private migrateV1;
+    private migrateV2;
     private assertOpen;
     private transaction;
     private tagsFor;
@@ -52,6 +53,8 @@ export declare class TodoStore {
     update(id: string, patch: UpdateTodoPatch): Todo;
     /** Claim a pending todo and create its first Agent execution cycle. */
     beginRun(id: string, runId: string, sessionId: string): Todo;
+    /** Attach one child Session when its direct parent already belongs to a todo. */
+    linkRelatedSession(parentSessionId: string, sessionId: string): TodoSession | undefined;
     /** Return a failed initial dispatch to pending while retaining its audit record. */
     failRun(id: string, runId: string, message: string): Todo;
     /** Record progress from the todo's primary Agent Session. */

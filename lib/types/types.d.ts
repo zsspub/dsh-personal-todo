@@ -43,7 +43,7 @@ export interface TodoRun {
 export interface TodoSession {
     readonly todoId: string;
     readonly sessionId: string;
-    readonly role: 'primary';
+    readonly role: 'primary' | 'related';
     readonly parentSessionId: string | null;
     readonly createdAt: string;
 }

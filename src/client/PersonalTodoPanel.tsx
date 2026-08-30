@@ -7,7 +7,7 @@ import {
 import type {
   CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest,
   RequestTodoChangesRequest, Todo, TodoDetail, TodoEventType, TodoListResult,
-  TodoPriority, TodoStatus, UpdateTodoRequest,
+  TodoPriority, TodoSession, TodoStatus, UpdateTodoRequest,
 } from '../types.ts'
 import type { NS } from './locales.ts'
 
@@ -65,7 +65,7 @@ export interface PersonalTodoPanelInjected {
   readonly approve: (id: string, signal: AbortSignal) => Promise<Todo>
   readonly requestChanges: (request: RequestTodoChangesRequest, signal: AbortSignal) => Promise<Todo>
   readonly delete: (id: string, signal: AbortSignal) => Promise<DeleteTodoResult>
-  readonly openSession: (id: string) => void
+  readonly openSession: (id: string, parentSessionId: string | null) => Promise<boolean>
 }
 
 export type PersonalTodoPanelProps = PropsRuntime<'sidebar.footer.action'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected
@@ -229,6 +229,12 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
 
   const eventLabel = (type: TodoEventType): string => t(`event.${type}`)
 
+  const sessionLabel = (session: TodoSession, sessions: readonly TodoSession[]): string => {
+    if (session.role === 'primary') return t('session.primary')
+    const index = sessions.filter(candidate => candidate.role === 'related').findIndex(candidate => candidate.sessionId === session.sessionId)
+    return t('session.related', { index: index + 1 })
+  }
+
   const mutate = async (operation: (signal: AbortSignal) => Promise<unknown>): Promise<boolean> => {
     setBusy(true)
     setError(undefined)
@@ -270,9 +276,15 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
       })
   }
 
-  const openConversation = (sessionId: string): void => {
-    openSession(sessionId)
-    close()
+  const openConversation = (sessionId: string, parentSessionId: string | null): void => {
+    setBusy(true)
+    setError(undefined)
+    void openSession(sessionId, parentSessionId).then((opened) => {
+      if (opened) close()
+      else setError(t('state.sessionUnavailable'))
+    }, (reason: unknown) => {
+      setError(errorText(reason))
+    }).finally(() => { setBusy(false) })
   }
 
   const emptyMessage = view === 'active' ? t('state.emptyActive') : t('state.emptyCompleted')
@@ -352,7 +364,7 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
                 <div><h2>{detail.todo.title}</h2><div className="dsh-personal-todo-meta"><span className="dsh-personal-todo-badge" data-status={detail.todo.status}>{statusLabel(detail.todo.status)}</span><span>{t('meta.reviewRound', { round: detail.todo.reviewRound })}</span></div></div>
                 <div className="dsh-personal-todo-detail-actions">
                   {detail.todo.status === 'pending' && <Button variant="primary" disabled={busy} onClick={() => { void mutate(signal => start(detail.todo.id, signal)) }}>{t('action.start')}</Button>}
-                  {detail.todo.primarySessionId !== null && <Button variant="outline" onClick={() => { openConversation(detail.todo.primarySessionId as string) }}>{t('action.openConversation')}</Button>}
+                  {detail.todo.primarySessionId !== null && <Button variant="outline" onClick={() => { openConversation(detail.todo.primarySessionId as string, null) }}>{t('action.openConversation')}</Button>}
                   {(detail.todo.status === 'pending' || detail.todo.status === 'completed' || detail.todo.status === 'cancelled') && <Button variant="outline" icon={<IconTrashOutline16 />} onClick={() => { setConfirming(detail.todo) }}>{t('action.delete')}</Button>}
                 </div>
               </div>
@@ -365,7 +377,7 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
                 <div className="dsh-personal-todo-feedback"><textarea aria-label={t('feedback.aria')} value={feedback} onChange={event => { setFeedback(event.target.value) }} placeholder={t('feedback.placeholder')} /><Button variant="outline" disabled={busy || feedback.trim() === ''} onClick={() => { void mutate(signal => requestChanges({ id: detail.todo.id, feedback }, signal)).then(saved => { if (saved) setFeedback('') }) }}>{t('action.requestChanges')}</Button></div>
               </div>}
               <h3>{t('detail.conversations')}</h3>
-              {detail.sessions.length === 0 ? <p>{t('detail.noConversations')}</p> : detail.sessions.map(session => <div className="dsh-personal-todo-session" key={session.sessionId}><span>{t('session.primary')}</span><Button size="sm" variant="outline" onClick={() => { openConversation(session.sessionId) }}>{t('action.openConversation')}</Button></div>)}
+              {detail.sessions.length === 0 ? <p>{t('detail.noConversations')}</p> : detail.sessions.map(session => <div className="dsh-personal-todo-session" key={session.sessionId}><span>{sessionLabel(session, detail.sessions)}</span><Button size="sm" variant="outline" onClick={() => { openConversation(session.sessionId, session.parentSessionId) }}>{t('action.openConversation')}</Button></div>)}
               <h3>{t('detail.activity')}</h3>
               <div className="dsh-personal-todo-timeline">{detail.events.map(event => <div className="dsh-personal-todo-event" key={event.id}><span>•</span><span><strong>{eventLabel(event.type)}</strong>{event.message === null ? null : <> · {event.message}</>}</span><time>{new Date(event.createdAt).toLocaleString()}</time></div>)}</div>
             </>}

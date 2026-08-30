@@ -20,6 +20,14 @@ declare module '@deepseek-ai/cordis' {
     personalTodo: PersonalTodoService
     sessionController: TodoSessionController
   }
+
+  interface Events {
+    /** @mode emit */
+    'session/created'(session: {
+      readonly id: string
+      readonly header: { readonly parentSession?: string }
+    }): void
+  }
 }
 
 /** Deployment configuration for the personal todo database and list bounds. */
@@ -62,7 +70,7 @@ function resolveConfig(config: Config): ResolvedConfig {
 
 /** Authoritative todo service shared by generated Remote methods and Agent tools. */
 export class PersonalTodoService extends TypertRemoteService {
-  static inject = ['sessionController']
+  static inject = ['sessionController', 'sessions']
 
   static Config: z<Config> = z.object({
     databasePath: z.string().required(),
@@ -82,6 +90,10 @@ export class PersonalTodoService extends TypertRemoteService {
     const resolved = resolveConfig(config)
     this.store = new TodoStore(resolved)
     this.orchestrator = new TodoOrchestrator(this.store, ctx.sessionController, resolved)
+    ctx.on('session/created', (session) => {
+      const parentSessionId = session.header.parentSession
+      if (parentSessionId !== undefined) this.store.linkRelatedSession(parentSessionId, session.id)
+    }, { global: true })
     ctx.effect(() => () => { this.store.close() }, 'personal-todo: close sqlite')
   }
 
