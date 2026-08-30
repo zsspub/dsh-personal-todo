@@ -3,19 +3,29 @@ import type {
   RemoteResult,
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, Todo, TodoListResult, UpdateTodoRequest } from 'dsh-personal-todo/types'
+import type { CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest } from 'dsh-personal-todo/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$706572736f6e616c546f646f {
+    approve: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     create: (request: CreateTodoInput, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     delete: (request: DeleteTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<DeleteTodoResult>>
+    get: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<TodoDetail>>
     list: (request: ListTodoInput, signal?: AbortSignal) => Promise<RemoteResult<TodoListResult>>
+    reply: (request: ReplyTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
+    requestChanges: (request: RequestTodoChangesRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
+    start: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     update: (request: UpdateTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
   }
   interface TypertRemoteMap {
+    'personalTodo/approve': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     'personalTodo/create': (request: CreateTodoInput, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     'personalTodo/delete': (request: DeleteTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<DeleteTodoResult>>
+    'personalTodo/get': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<TodoDetail>>
     'personalTodo/list': (request: ListTodoInput, signal?: AbortSignal) => Promise<RemoteResult<TodoListResult>>
+    'personalTodo/reply': (request: ReplyTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
+    'personalTodo/requestChanges': (request: RequestTodoChangesRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
+    'personalTodo/start': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     'personalTodo/update': (request: UpdateTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
   }
   interface TypertRemoteNamespaceMap {

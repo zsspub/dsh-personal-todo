@@ -20,7 +20,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-export const inject = ['slots', 'locale', 'remote']
+export const inject = ['slots', 'locale', 'remote', 'sessions']
+
+interface SessionNavigation {
+  readonly sessions: { open(id: string): void }
+}
 
 function remoteFailure(result: { readonly error: { readonly message: string; readonly code: string } }): Error {
   return new Error(`${result.error.message} (${result.error.code})`)
@@ -31,6 +35,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'personal-todo: dictionaries')
   const disposeRemote = await ctx.remote.$mount(personalTodoRemote)
   const uiFiber = ctx.inject(['remote.personalTodo'], (scope: ClientContext) => {
+    const navigation = scope as ClientContext & SessionNavigation
     scope.slots.inject('sidebar.footer.action', () => scope.slots.register({
       name: 'sidebar.footer.action',
       id: 'personal-todo',
@@ -39,6 +44,11 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       inject: (): PersonalTodoPanelInjected => ({
         list: async (request, signal) => {
           const result = await scope.remote.personalTodo.list(request, signal)
+          if (!result.ok) throw remoteFailure(result)
+          return result.value
+        },
+        get: async (id, signal) => {
+          const result = await scope.remote.personalTodo.get({ id }, signal)
           if (!result.ok) throw remoteFailure(result)
           return result.value
         },
@@ -52,11 +62,32 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
           if (!result.ok) throw remoteFailure(result)
           return result.value
         },
+        start: async (id, signal) => {
+          const result = await scope.remote.personalTodo.start({ id }, signal)
+          if (!result.ok) throw remoteFailure(result)
+          return result.value
+        },
+        reply: async (request, signal) => {
+          const result = await scope.remote.personalTodo.reply(request, signal)
+          if (!result.ok) throw remoteFailure(result)
+          return result.value
+        },
+        approve: async (id, signal) => {
+          const result = await scope.remote.personalTodo.approve({ id }, signal)
+          if (!result.ok) throw remoteFailure(result)
+          return result.value
+        },
+        requestChanges: async (request, signal) => {
+          const result = await scope.remote.personalTodo.requestChanges(request, signal)
+          if (!result.ok) throw remoteFailure(result)
+          return result.value
+        },
         delete: async (id, signal) => {
           const result = await scope.remote.personalTodo.delete({ id }, signal)
           if (!result.ok) throw remoteFailure(result)
           return result.value
         },
+        openSession: (id) => { navigation.sessions.open(id) },
       }),
     }, PersonalTodoPanel))
   })

@@ -9,14 +9,16 @@ read_when:
 
 [English](README.md) | 中文
 
-`dsh-personal-todo` 是一个可安装的 DeepSeek Harness Bundle，用 SQLite 存储个人待办。四个 Agent 工具和响应式 Web 侧栏面板共用同一个 Host 服务与数据库。
+`dsh-personal-todo` 是一个可安装的 DeepSeek Harness Bundle，用个人待办驱动普通 DSH Agent Session。待办是面向用户的任务，主会话保存执行记录并可按需打开。
 
 ## 功能
 
 - 使用 schema 版本、WAL、foreign keys、busy timeout 和仅限所有者的文件权限实现持久 SQLite 存储。
-- 提供 `personal_todo_add`、`personal_todo_list`、`personal_todo_update` 和 `personal_todo_delete` Agent 工具。
-- 为 Web Client 提供 `personalTodo.list`、`create`、`update` 和 `delete` Typert Remote 方法。
-- 提供活动/已完成视图、搜索、全部标签匹配、新建编辑、完成重开、刷新、分页和删除确认。
+- 每个启动的待办拥有一个持久主会话，阻塞回复和审核修改复用该会话。
+- 使用 `pending`、`in_progress`、`blocked`、`in_review`、`completed` 和 `cancelled` 状态；只有用户审核能完成任务。
+- 在当前待办快照之外持久保存 Run、Session 关联和活动记录。
+- 提供创建、查询、编辑、进度、阻塞提问、提交审核和删除 Agent 工具。
+- 提供双栏任务中心、待办内回复、审核摘要、修改意见、活动记录和会话跳转。
 - 提供 typed 中英文 Client 字典。
 
 ## 环境要求
@@ -48,9 +50,16 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 | `personal_todo_add` | 新建待办，并可设置备注、状态、优先级、截止时间和标签。 |
 | `personal_todo_list` | 筛选和分页查询待办，返回匹配记录、总数、全局状态计数和 `hasMore`。 |
 | `personal_todo_update` | 替换任意已提供的可变字段；`null` 清空备注或截止时间，`[]` 清空标签。 |
+| `personal_todo_progress` | 由待办主 Agent Session 记录一项有意义的进度。 |
+| `personal_todo_block` | 暂停执行，并在任务中心显示一个待回答问题。 |
+| `personal_todo_submit_review` | 提交完成摘要、验证结果和遗留风险供用户审核。 |
 | `personal_todo_delete` | 按 UUID 永久删除一条待办。 |
 
-列表默认显示待处理和进行中的待办。传入 `statuses: ["completed"]` 可读取完成历史。提供多个标签时，每个标签都必须匹配。
+列表默认显示所有活动状态。传入 `statuses: ["completed"]` 可读取完成历史。生命周期只能通过启动、阻塞、回复、提交审核、审核通过和提出修改意见流转；通用编辑不能绕过审核门禁。
+
+## 任务流程
+
+在 Web 任务中心创建待办会立即开始执行。启动任意待处理待办会创建或接管一个确定的普通 Session，并把任务说明发送给 Agent。Agent 可以记录进度，在缺少输入时提交明确问题，并把结果流转到 `in_review`。审核通过后进入 `completed`；提出修改意见会在同一个主会话中创建新的 Run，并返回 `in_progress`。
 
 ## 配置
 
@@ -63,6 +72,7 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 | `busyTimeoutMs` | `5000` | SQLite 等待写入锁释放的时间。 |
 | `defaultListLimit` | `50` | 调用方未提供 `limit` 时的页大小。 |
 | `maxListLimit` | `200` | 允许的最大页大小。 |
+| `agentPreset` | 未设置 | 待办创建主会话时可选的 Agent preset。 |
 
 部署策略需要其他值时，可覆盖 profile patch 中生成的插件配置。服务会拒绝相对路径、无效限制和高于当前支持版本的数据库 schema。
 
@@ -70,7 +80,7 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 
 标题会去除首尾空白，最多 200 个字符。备注会去除首尾空白，最多 10,000 个字符。每条待办最多包含 20 个唯一的小写标签，每个标签最多 32 个字符。截止时间必须是 RFC 3339 时间，并以规范 UTC 格式返回。
 
-完成待办会设置 `completedAt`，重开会清空 `completedAt`。完成记录会一直保留，直到显式删除。活动待办依次按进行中状态、较早截止时间、较高优先级和较新创建时间排序；已完成待办按完成时间倒序排列。
+审核通过会设置 `completedAt`。完成记录及其 Run、Session 关联和活动历史会一直保留，直到显式删除。活动列表优先显示待审核和等待回复的任务，再显示执行中和待处理任务。版本一数据库会在首次加载时原地迁移到任务驱动 schema。
 
 ## 开发
 

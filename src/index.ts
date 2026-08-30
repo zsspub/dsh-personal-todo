@@ -3,10 +3,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { TodoOrchestrator, type TodoSessionController } from './host/orchestrator.ts'
 import { TodoStore, type JournalMode } from './host/store.ts'
 import type {
-  CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, Todo, TodoListResult,
-  UpdateTodoRequest,
+  BlockTodoRequest, CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput,
+  ReplyTodoRequest, ReportTodoProgressRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest,
+  Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -16,6 +18,7 @@ export type { JournalMode, TodoStoreConfig } from './host/store.ts'
 declare module '@deepseek-ai/cordis' {
   interface Context {
     personalTodo: PersonalTodoService
+    sessionController: TodoSessionController
   }
 }
 
@@ -26,6 +29,8 @@ export interface Config {
   readonly busyTimeoutMs?: number
   readonly defaultListLimit?: number
   readonly maxListLimit?: number
+  /** Optional Agent preset used by todo-created root Sessions. */
+  readonly agentPreset?: string
 }
 
 interface ResolvedConfig {
@@ -34,6 +39,7 @@ interface ResolvedConfig {
   readonly busyTimeoutMs: number
   readonly defaultListLimit: number
   readonly maxListLimit: number
+  readonly agentPreset?: string
 }
 
 const DEFAULTS = {
@@ -50,25 +56,32 @@ function resolveConfig(config: Config): ResolvedConfig {
     busyTimeoutMs: config.busyTimeoutMs ?? DEFAULTS.busyTimeoutMs,
     defaultListLimit: config.defaultListLimit ?? DEFAULTS.defaultListLimit,
     maxListLimit: config.maxListLimit ?? DEFAULTS.maxListLimit,
+    ...(config.agentPreset === undefined ? {} : { agentPreset: config.agentPreset }),
   }
 }
 
 /** Authoritative todo service shared by generated Remote methods and Agent tools. */
 export class PersonalTodoService extends TypertRemoteService {
+  static inject = ['sessionController']
+
   static Config: z<Config> = z.object({
     databasePath: z.string().required(),
     journalMode: z.union(['wal', 'delete', 'truncate', 'persist'] as const).default(DEFAULTS.journalMode),
     busyTimeoutMs: z.number().step(1).min(1).default(DEFAULTS.busyTimeoutMs),
     defaultListLimit: z.number().step(1).min(1).default(DEFAULTS.defaultListLimit),
     maxListLimit: z.number().step(1).min(1).default(DEFAULTS.maxListLimit),
+    agentPreset: z.string(),
   })
 
   private readonly store: TodoStore
+  private readonly orchestrator: TodoOrchestrator
 
   /** @param ctx - Host context publishing the `personalTodo` Remote namespace. @param config - validated database policy. */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'personalTodo')
-    this.store = new TodoStore(resolveConfig(config))
+    const resolved = resolveConfig(config)
+    this.store = new TodoStore(resolved)
+    this.orchestrator = new TodoOrchestrator(this.store, ctx.sessionController, resolved)
     ctx.effect(() => () => { this.store.close() }, 'personal-todo: close sqlite')
   }
 
@@ -86,11 +99,61 @@ export class PersonalTodoService extends TypertRemoteService {
     return Promise.resolve(this.store.create(request))
   }
 
+  /** Read one todo with its runs, Sessions, and activity timeline. */
+  @Remote
+  get(request: TodoIdRequest, signal: AbortSignal): Promise<TodoDetail> {
+    signal.throwIfAborted()
+    return Promise.resolve(this.store.detail(request.id))
+  }
+
   /** Update one durable todo. */
   @Remote
   update(request: UpdateTodoRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
     return Promise.resolve(this.store.update(request.id, request.patch))
+  }
+
+  /** Start one pending todo in its durable root Session. */
+  @Remote
+  start(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
+    signal.throwIfAborted()
+    return this.orchestrator.start(request.id)
+  }
+
+  /** Resume a blocked todo with the user's answer. */
+  @Remote
+  reply(request: ReplyTodoRequest, signal: AbortSignal): Promise<Todo> {
+    signal.throwIfAborted()
+    return this.orchestrator.reply(request)
+  }
+
+  /** Accept the latest Agent submission as complete. */
+  @Remote
+  approve(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
+    signal.throwIfAborted()
+    return Promise.resolve(this.store.approve(request.id))
+  }
+
+  /** Return the reviewed todo to its root Session with user feedback. */
+  @Remote
+  requestChanges(request: RequestTodoChangesRequest, signal: AbortSignal): Promise<Todo> {
+    signal.throwIfAborted()
+    return this.orchestrator.requestChanges(request)
+  }
+
+  /** Record one progress milestone from the todo's primary Agent Session. */
+  reportProgress(request: ReportTodoProgressRequest, sessionId: string): Promise<Todo> {
+    return Promise.resolve(this.store.progress(request.id, sessionId, request.message))
+  }
+
+  /** Pause one todo on a question from its primary Agent Session. */
+  block(request: BlockTodoRequest, sessionId: string): Promise<Todo> {
+    return Promise.resolve(this.store.block(request, sessionId))
+  }
+
+  /** Submit one primary Agent Session's result for user review. */
+  submitReview(request: SubmitTodoReviewRequest, sessionId: string): Promise<Todo> {
+    return Promise.resolve(this.store.submitReview(request, sessionId))
   }
 
   /** Permanently delete one todo. */
