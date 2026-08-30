@@ -14,7 +14,9 @@ import type { NS } from './locales.ts'
 // The slot renderer anchors list slots with inline `display: contents`. A wide
 // sidebar reifies that wrapper so every footer action occupies its own row.
 const CSS = `
-.dsh-personal-todo-trigger{min-width:28px}
+.dsh-personal-todo-trigger{position:relative;min-width:28px}
+.dsh-personal-todo-attention{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-left:auto;padding:0 5px;border-radius:9px;background:var(--dsw-alias-label-error);color:var(--dsw-alias-bg-layer-1);font-size:11px;line-height:18px}
+.dsh-personal-todo-trigger[data-wide=false] .dsh-personal-todo-attention{position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;line-height:16px}
 [data-slot='sidebar.footer.action']:has(.dsh-personal-todo-trigger[data-wide=true]){display:flex!important;flex:1;flex-direction:column;min-width:0;width:100%}
 .dsh-personal-todo-trigger[data-wide=true]{justify-content:flex-start;width:100%}
 .dsh-personal-todo-dialog{width:min(1180px,calc(100vw - 32px));max-width:none;height:min(820px,calc(100vh - 32px))}
@@ -121,6 +123,7 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
   const [view, setView] = useState<View>('active')
   const [todos, setTodos] = useState<Todo[]>([])
   const [result, setResult] = useState<TodoListResult>()
+  const [attentionCount, setAttentionCount] = useState(0)
   const [selectedId, setSelectedId] = useState<string>()
   const [detail, setDetail] = useState<TodoDetail>()
   const [searchDraft, setSearchDraft] = useState('')
@@ -153,6 +156,15 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
     }
   }, [get])
 
+  const fetchAttention = useCallback(async (): Promise<void> => {
+    try {
+      const page = await withController(signal => list({ statuses: ['blocked', 'in_review'], limit: 1 }, signal))
+      setAttentionCount(page.counts.blocked + page.counts.inReview)
+    } catch (reason) {
+      setError(errorText(reason))
+    }
+  }, [list])
+
   const fetchPage = useCallback(async (offset: number, append = false, silent = false): Promise<void> => {
     if (!silent) setBusy(true)
     setError(undefined)
@@ -165,6 +177,7 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
       }, signal))
       setTodos(current => append ? [...current, ...page.todos] : page.todos.slice())
       setResult(page)
+      setAttentionCount(page.counts.blocked + page.counts.inReview)
     } catch (reason) {
       setError(errorText(reason))
     } finally {
@@ -183,6 +196,12 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
     if (!open) return
     void fetchPage(0)
   }, [fetchPage, open])
+
+  useEffect(() => {
+    void fetchAttention()
+    const interval = window.setInterval(() => { void fetchAttention() }, ACTIVE_REFRESH_MS)
+    return () => { window.clearInterval(interval) }
+  }, [fetchAttention])
 
   useEffect(() => {
     if (!open || !todos.some(todo => todo.status === 'in_progress')) return
@@ -290,6 +309,9 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
   const emptyMessage = view === 'active' ? t('state.emptyActive') : t('state.emptyCompleted')
   const visibleTodos = useMemo(() => todos, [todos])
   const selectedRun = detail?.runs[0]
+  const triggerLabel = attentionCount === 0
+    ? t('trigger.aria')
+    : t('trigger.attention', { count: attentionCount })
 
   return (
     <>
@@ -299,12 +321,13 @@ export function PersonalTodoPanel(props: PersonalTodoPanelProps) {
         variant="ghost"
         size="sm"
         icon={<IconListPenOutline16 />}
-        aria-label={t('trigger.aria')}
-        title={t('trigger.aria')}
+        aria-label={triggerLabel}
+        title={triggerLabel}
         data-wide={wide}
         onClick={() => { setOpen(true) }}
       >
-        {wide ? t('trigger.label') : null}
+        {wide ? <span>{t('trigger.label')}</span> : null}
+        {attentionCount > 0 && <span className="dsh-personal-todo-attention" aria-hidden="true">{attentionCount}</span>}
       </Button>
       <Modal
         open={open}

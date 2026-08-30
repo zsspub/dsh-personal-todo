@@ -55,6 +55,8 @@ export declare class TodoStore {
     beginRun(id: string, runId: string, sessionId: string): Todo;
     /** Attach one child Session when its direct parent already belongs to a todo. */
     linkRelatedSession(parentSessionId: string, sessionId: string): TodoSession | undefined;
+    /** Return running todos whose existing root Sessions need process-start recovery. */
+    recoverableTodos(): Todo[];
     /** Return a failed initial dispatch to pending while retaining its audit record. */
     failRun(id: string, runId: string, message: string): Todo;
     /** Record progress from the todo's primary Agent Session. */

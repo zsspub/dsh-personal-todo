@@ -2,6 +2,7 @@
 export declare const zh: {
     'trigger.label': string;
     'trigger.aria': string;
+    'trigger.attention': string;
     'panel.title': string;
     'panel.description': string;
     'panel.close': string;
@@ -87,6 +88,7 @@ export type PersonalTodoKey = keyof typeof zh;
 export declare const en: {
     'trigger.label': string;
     'trigger.aria': string;
+    'trigger.attention': string;
     'panel.title': string;
     'panel.description': string;
     'panel.close': string;

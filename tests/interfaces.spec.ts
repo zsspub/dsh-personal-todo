@@ -1,6 +1,10 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import PersonalTodoService from '../src/index.ts'
+import { TodoStore } from '../src/host/store.ts'
 import { apply as applyTools } from '../src/tools.ts'
 import type { CreateTodoInput, ListTodoInput, UpdateTodoRequest } from '../src/types.ts'
 
@@ -22,7 +26,9 @@ interface CapturedTool {
 
 class SessionControllerStub extends Service {
   readonly created: string[] = []
+  readonly resolved: string[] = []
   readonly messages: Array<{ readonly sessionId: string; readonly text: string }> = []
+  agentStatus: 'idle' | 'running' = 'idle'
 
   constructor(ctx: Context) {
     super(ctx, 'sessionController')
@@ -37,9 +43,11 @@ class SessionControllerStub extends Service {
     readonly id: string
     followup(message: { readonly content: readonly [{ readonly text: string }] }): void
   } }> {
+    this.resolved.push(sessionId)
     return Promise.resolve({
       agent: {
         id: sessionId,
+        status: this.agentStatus,
         followup: message => { this.messages.push({ sessionId, text: message.content[0].text }) },
       },
     })
@@ -53,15 +61,18 @@ class SessionsStub extends Service {
 }
 
 const contexts: Context[] = []
+const temporaryDirectories: string[] = []
 const signal = new AbortController().signal
 
-async function setup() {
+async function setup(databasePath = ':memory:', agentStatus: 'idle' | 'running' = 'idle') {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(SessionControllerStub)
+  const sessionController = ctx.sessionController as unknown as SessionControllerStub
+  sessionController.agentStatus = agentStatus
   await ctx.plugin(SessionsStub)
   await ctx.plugin(PersonalTodoService, {
-    databasePath: ':memory:',
+    databasePath,
     defaultListLimit: 50,
     maxListLimit: 200,
   })
@@ -72,7 +83,7 @@ async function setup() {
   } as unknown as Context)
   return {
     ctx,
-    sessions: ctx.sessionController as SessionControllerStub,
+    sessions: ctx.sessionController as unknown as SessionControllerStub,
     tools: new Map(tools.map(tool => [tool.name, tool])),
   }
 }
@@ -87,6 +98,7 @@ function run(sessionId?: string) {
 
 afterEach(async () => {
   for (const ctx of contexts.splice(0)) await ctx.fiber.dispose()
+  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true })
 })
 
 describe('Host Remote service and Agent tools', () => {
@@ -162,6 +174,49 @@ describe('Host Remote service and Agent tools', () => {
       { sessionId: 'child-1', role: 'related', parentSessionId: started.primarySessionId },
       { sessionId: 'grandchild-1', role: 'related', parentSessionId: 'child-1' },
     ])
+  })
+
+  it('resumes a durable in-progress todo after the Host service restarts', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dsh-personal-todo-recovery-'))
+    temporaryDirectories.push(directory)
+    const databasePath = join(directory, 'todos.sqlite3')
+    const persisted = new TodoStore({
+      databasePath,
+      journalMode: 'wal',
+      busyTimeoutMs: 1_000,
+      defaultListLimit: 50,
+      maxListLimit: 200,
+    })
+    const todo = persisted.create({ title: 'Resume after restart' })
+    persisted.beginRun(todo.id, 'run-1', 'session-1')
+    persisted.close()
+
+    const { ctx, sessions } = await setup(databasePath)
+    await vi.waitFor(() => { expect(sessions.messages).toHaveLength(1) })
+    expect(sessions.created).toEqual([])
+    expect(sessions.messages[0]).toMatchObject({ sessionId: 'session-1' })
+    expect(sessions.messages[0]?.text).toContain('after the DSH service restart')
+    expect(await ctx.personalTodo.get({ id: todo.id }, signal)).toMatchObject({ todo: { status: 'in_progress' } })
+  })
+
+  it('does not duplicate restart work already owned by a running Agent', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dsh-personal-todo-running-'))
+    temporaryDirectories.push(directory)
+    const databasePath = join(directory, 'todos.sqlite3')
+    const persisted = new TodoStore({
+      databasePath,
+      journalMode: 'wal',
+      busyTimeoutMs: 1_000,
+      defaultListLimit: 50,
+      maxListLimit: 200,
+    })
+    const todo = persisted.create({ title: 'Already running' })
+    persisted.beginRun(todo.id, 'run-1', 'session-1')
+    persisted.close()
+
+    const { sessions } = await setup(databasePath, 'running')
+    await vi.waitFor(() => { expect(sessions.resolved).toEqual(['session-1']) })
+    expect(sessions.messages).toEqual([])
   })
 
   it('surfaces an Agent question in the todo and delivers the user reply to the same Session', async () => {

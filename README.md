@@ -16,6 +16,8 @@ English | [中文](README.zh.md)
 - Durable SQLite storage with schema versioning, WAL, foreign keys, a busy timeout, and owner-only filesystem permissions.
 - One durable root Session per started todo, reused for blocked replies and review changes.
 - Automatic discovery of delegated child Sessions, including nested children, as related todo conversations.
+- Process-start recovery for durable in-progress runs, without duplicating work already owned by a running Agent.
+- A sidebar attention count for todos waiting on a user reply or review.
 - Explicit `pending`, `in_progress`, `blocked`, `in_review`, `completed`, and `cancelled` task states; only user approval completes a task.
 - Durable run, Session-link, and activity history alongside the current todo snapshot.
 - Agent tools for creation, query, editing, progress, blocking questions, review submission, and deletion.
@@ -60,7 +62,7 @@ Lists show every active workflow state by default. Pass `statuses: ["completed"]
 
 ## Task flow
 
-Creating a todo in the Web task center starts it immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. The Agent may use the deployment's `delegate` tool or an equivalent subagent tool for independent workstreams; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
+Creating a todo in the Web task center starts it immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. The Agent may use the deployment's `delegate` tool or an equivalent subagent tool for independent workstreams; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. The sidebar count surfaces blocked and review-ready work without opening the task center. After a DSH process restart, the plugin resumes durable `in_progress` runs whose Agent is not already running. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
 
 ## Configuration
 

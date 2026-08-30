@@ -3,6 +3,7 @@
 export const zh = {
   'trigger.label': '待办',
   'trigger.aria': '打开个人待办',
+  'trigger.attention': '{count} 项待办需要处理',
   'panel.title': '个人待办',
   'panel.description': '以待办驱动 Agent，审核结果，并按需查看执行会话。',
   'panel.close': '关闭待办面板',
@@ -90,6 +91,7 @@ export type PersonalTodoKey = keyof typeof zh
 export const en = {
   'trigger.label': 'Todos',
   'trigger.aria': 'Open personal todos',
+  'trigger.attention': '{count} personal todos require attention',
   'panel.title': 'Personal Todos',
   'panel.description': 'Drive Agents from todos, review outcomes, and inspect execution conversations on demand.',
   'panel.close': 'Close todo panel',

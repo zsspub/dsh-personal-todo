@@ -150,6 +150,20 @@ describe('TodoStore', () => {
     ])
   })
 
+  it('selects only durable in-progress runs for service-start recovery', () => {
+    const todos = store({ ids: ['running', 'blocked', 'review'] })
+    const running = todos.create({ title: 'Running' })
+    const blocked = todos.create({ title: 'Blocked' })
+    const review = todos.create({ title: 'Review' })
+    todos.beginRun(running.id, 'run-running', 'session-running')
+    todos.beginRun(blocked.id, 'run-blocked', 'session-blocked')
+    todos.block({ id: blocked.id, question: 'Need input' }, 'session-blocked')
+    todos.beginRun(review.id, 'run-review', 'session-review')
+    todos.submitReview({ id: review.id, summary: 'Ready' }, 'session-review')
+
+    expect(todos.recoverableTodos().map(todo => todo.id)).toEqual(['running'])
+  })
+
   it('rejects invalid lifecycle transitions and Agent Sessions that do not own the todo', () => {
     const todos = store()
     const created = todos.create({ title: 'Owned task' })

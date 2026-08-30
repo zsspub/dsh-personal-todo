@@ -94,7 +94,16 @@ export class PersonalTodoService extends TypertRemoteService {
       const parentSessionId = session.header.parentSession
       if (parentSessionId !== undefined) this.store.linkRelatedSession(parentSessionId, session.id)
     }, { global: true })
-    ctx.effect(() => () => { this.store.close() }, 'personal-todo: close sqlite')
+    ctx.effect(() => {
+      const recovery = new AbortController()
+      void this.orchestrator.recover(recovery.signal).catch((error: unknown) => {
+        if (!recovery.signal.aborted) ctx.logger.warn(`personal-todo: recovery failed: ${String(error)}`)
+      })
+      return () => {
+        recovery.abort()
+        this.store.close()
+      }
+    }, 'personal-todo: recover runs and close sqlite')
   }
 
   /** List one bounded page. Cancellation is checked before synchronous SQLite work begins. */

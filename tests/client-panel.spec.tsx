@@ -192,14 +192,27 @@ describe('PersonalTodoPanel', () => {
   it('renders a full-width text action in a wide sidebar and an icon in a narrow sidebar', () => {
     const service = api()
     const view = render(<PersonalTodoPanel {...panelProps(service)} />)
-    const wideAction = screen.getByRole('button', { name: 'Open personal todos' })
+    const wideAction = screen.getByRole('button', { name: /personal todos/i })
     expect(wideAction.textContent).toContain('Todos')
     expect(wideAction.getAttribute('data-wide')).toBe('true')
     expect(document.querySelector('style')?.textContent).toContain(
       "[data-slot='sidebar.footer.action']:has(.dsh-personal-todo-trigger[data-wide=true])",
     )
     view.rerender(<PersonalTodoPanel {...panelProps(service, false)} />)
-    expect(screen.getByRole('button', { name: 'Open personal todos' }).textContent).toBe('')
+    expect(screen.getByRole('button', { name: /personal todos/i }).textContent).toBe('')
+  })
+
+  it('shows blocked and review work on the sidebar action while the panel is closed', async () => {
+    const service = api([
+      todo({ id: 'blocked', status: 'blocked', blockedReason: 'Need input' }),
+      todo({ id: 'review', status: 'in_review', latestSummary: 'Ready' }),
+      todo({ id: 'pending' }),
+    ])
+    render(<PersonalTodoPanel {...panelProps(service)} />)
+
+    const trigger = await screen.findByRole('button', { name: '2 personal todos require attention' })
+    expect(within(trigger).getByText('2')).toBeTruthy()
+    expect(screen.queryByRole('dialog', { name: 'Personal Todos' })).toBeNull()
   })
 
   it('creates, edits, starts, inspects, and opens the root execution conversation', async () => {
@@ -207,7 +220,7 @@ describe('PersonalTodoPanel', () => {
     const service = api()
     render(<PersonalTodoPanel {...panelProps(service)} />)
 
-    await user.click(screen.getByRole('button', { name: 'Open personal todos' }))
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
     expect(await screen.findByText('No active todos.')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'New todo' }))
     await user.type(screen.getByPlaceholderText('What needs to be done?'), 'Write tests')
@@ -250,7 +263,7 @@ describe('PersonalTodoPanel', () => {
     }
     render(<PersonalTodoPanel {...panelProps(service)} />)
 
-    await user.click(screen.getByRole('button', { name: 'Open personal todos' }))
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
     expect(await screen.findByText('Primary execution conversation')).toBeTruthy()
     expect(await screen.findByText('Related work conversation 1')).toBeTruthy()
@@ -265,7 +278,7 @@ describe('PersonalTodoPanel', () => {
       blockedReason: 'Which option?', latestSummary: 'Which option?',
     })])
     render(<PersonalTodoPanel {...panelProps(service)} />)
-    await user.click(screen.getByRole('button', { name: 'Open personal todos' }))
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
     expect((await screen.findAllByText('Which option?')).length).toBeGreaterThan(0)
     await user.type(screen.getByRole('textbox', { name: 'Reply to Agent' }), 'Use option A')
@@ -282,7 +295,7 @@ describe('PersonalTodoPanel', () => {
     })
     const service = api([review])
     const view = render(<PersonalTodoPanel {...panelProps(service)} />)
-    await user.click(screen.getByRole('button', { name: 'Open personal todos' }))
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
     expect(await screen.findByText('Unit tests passed.')).toBeTruthy()
     await user.type(screen.getByRole('textbox', { name: 'Change request' }), 'Add one edge case.')
@@ -303,7 +316,7 @@ describe('PersonalTodoPanel', () => {
       status: 'in_progress', primarySessionId: 'session-1', activeRunId: 'run-1',
     })])
     render(<PersonalTodoPanel {...panelProps(service)} />)
-    await user.click(screen.getByRole('button', { name: 'Open personal todos' }))
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
 
     service.rows[0] = todo({
@@ -320,7 +333,7 @@ describe('PersonalTodoPanel', () => {
     const user = userEvent.setup()
     const service = api([todo({ status: 'completed', completedAt: '2026-01-02T00:00:00.000Z' })])
     render(<PersonalTodoPanel {...panelProps(service)} />)
-    await user.click(screen.getByRole('button', { name: 'Open personal todos' }))
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(screen.getByRole('button', { name: 'Completed' }))
     await user.type(screen.getByRole('textbox', { name: 'Filter by tags' }), 'work')
     await user.click(screen.getByRole('button', { name: 'Apply filters' }))
@@ -344,11 +357,11 @@ describe('PersonalTodoPanel', () => {
         signal.addEventListener('abort', () => { aborted = true; reject(signal.reason) }, { once: true })
       })) }
     render(<PersonalTodoPanel {...panelProps(service)} />)
-    await user.click(screen.getByRole('button', { name: 'Open personal todos' }))
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(screen.getByRole('button', { name: 'Close todo panel' }))
     expect(aborted).toBe(true)
     fail = true
-    await user.click(screen.getByRole('button', { name: 'Open personal todos' }))
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
     expect((await screen.findByRole('alert')).textContent).toContain('database unavailable')
   })
 })

@@ -8,6 +8,7 @@ import { PersonalTodoError, TodoStore } from './store.ts'
 
 interface TodoAgent {
   readonly id: string
+  readonly status: 'idle' | 'running'
   followup(message: {
     readonly id: string
     readonly role: 'user'
@@ -40,7 +41,7 @@ function taskPrompt(todo: Todo): string {
     `Notes: ${notes}`,
     '',
     'Work autonomously within the current DSH permissions and execution context.',
-      'When the delegate tool or an equivalent subagent tool is available, use it for independent workstreams that benefit from separate related conversations; delegated conversations are linked to this todo automatically.',
+    'When the delegate tool or an equivalent subagent tool is available, use it for independent workstreams that benefit from separate related conversations; delegated conversations are linked to this todo automatically.',
     `Use personal_todo_progress with id ${todo.id} for meaningful milestones.`,
     `If user input is required, call personal_todo_block with id ${todo.id} and the exact question.`,
     `When the requested outcome is ready, call personal_todo_submit_review with id ${todo.id}, a concise summary, verification performed, and remaining risks.`,
@@ -54,6 +55,10 @@ function replyPrompt(todoId: string, message: string): string {
 
 function changesPrompt(todoId: string, feedback: string): string {
   return `The user requested changes for personal todo ${todoId}:\n\n${feedback}\n\nApply the feedback, report meaningful progress, and submit a new review when ready.`
+}
+
+function recoveryPrompt(todoId: string): string {
+  return `Resume personal todo ${todoId} after the DSH service restart. Inspect the existing conversation before acting, continue only unfinished work, and submit the result for review when ready.`
 }
 
 /** Starts and resumes the one ordinary root Session owned by each todo. */
@@ -73,6 +78,30 @@ export class TodoOrchestrator {
       content: [{ type: 'text', text }],
       source: { kind: 'user' },
     })
+  }
+
+  /** Resume durable in-progress runs whose Agents are not already active. */
+  async recover(signal: AbortSignal): Promise<void> {
+    for (const todo of this.store.recoverableTodos()) {
+      signal.throwIfAborted()
+      const sessionId = todo.primarySessionId as string
+      const runId = todo.activeRunId as string
+      try {
+        const resolved = await this.sessions.resolveAgent(sessionId)
+        signal.throwIfAborted()
+        if ('error' in resolved) throw new PersonalTodoError(resolved.error.message)
+        if (resolved.agent.status === 'running') continue
+        resolved.agent.followup({
+          id: randomUUID(),
+          role: 'user',
+          content: [{ type: 'text', text: recoveryPrompt(todo.id) }],
+          source: { kind: 'user' },
+        })
+      } catch (error) {
+        if (signal.aborted) return
+        this.store.failRun(todo.id, runId, error instanceof Error ? error.message : String(error))
+      }
+    }
   }
 
   /** Create or resume a root Session and dispatch one pending todo. */

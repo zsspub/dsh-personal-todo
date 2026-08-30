@@ -3,6 +3,7 @@ import type { ReplyTodoRequest, RequestTodoChangesRequest, Todo } from '../types
 import { TodoStore } from './store.ts';
 interface TodoAgent {
     readonly id: string;
+    readonly status: 'idle' | 'running';
     followup(message: {
         readonly id: string;
         readonly role: 'user';
@@ -41,6 +42,8 @@ export declare class TodoOrchestrator {
     private readonly config;
     constructor(store: TodoStore, sessions: TodoSessionController, config: TodoOrchestratorConfig);
     private deliver;
+    /** Resume durable in-progress runs whose Agents are not already active. */
+    recover(signal: AbortSignal): Promise<void>;
     /** Create or resume a root Session and dispatch one pending todo. */
     start(id: string): Promise<Todo>;
     /** Deliver a user's answer to the blocked root Session. */
