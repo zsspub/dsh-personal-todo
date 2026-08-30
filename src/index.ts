@@ -155,6 +155,20 @@ export class PersonalTodoService extends TypertRemoteService {
     return Promise.resolve(this.store.approve(request.id))
   }
 
+  /** Move one todo to the archive without changing its lifecycle state. */
+  @Remote
+  archive(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
+    signal.throwIfAborted()
+    return Promise.resolve(this.store.archive(request.id))
+  }
+
+  /** Restore one archived todo to its lifecycle list. */
+  @Remote
+  restore(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
+    signal.throwIfAborted()
+    return Promise.resolve(this.store.restore(request.id))
+  }
+
   /** Return the reviewed todo to its root Session with user feedback. */
   @Remote
   requestChanges(request: RequestTodoChangesRequest, signal: AbortSignal): Promise<Todo> {

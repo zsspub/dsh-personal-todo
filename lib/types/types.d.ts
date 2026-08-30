@@ -2,7 +2,7 @@
 export declare const TODO_STATUSES: readonly ["pending", "in_progress", "blocked", "in_review", "completed", "cancelled"];
 export declare const TODO_PRIORITIES: readonly ["none", "low", "medium", "high"];
 export declare const TODO_RUN_STATUSES: readonly ["running", "waiting_input", "submitted", "failed", "cancelled"];
-export declare const TODO_EVENT_TYPES: readonly ["created", "updated", "run_started", "progress", "blocked", "user_replied", "review_submitted", "review_approved", "changes_requested", "run_failed", "cancelled"];
+export declare const TODO_EVENT_TYPES: readonly ["created", "updated", "run_started", "progress", "blocked", "user_replied", "review_submitted", "review_approved", "changes_requested", "run_failed", "cancelled", "archived", "restored"];
 export type TodoStatus = (typeof TODO_STATUSES)[number];
 export type TodoPriority = (typeof TODO_PRIORITIES)[number];
 export type TodoRunStatus = (typeof TODO_RUN_STATUSES)[number];
@@ -25,6 +25,7 @@ export interface Todo {
     readonly createdAt: string;
     readonly updatedAt: string;
     readonly completedAt: string | null;
+    readonly archivedAt: string | null;
 }
 /** One Agent execution cycle for a todo. */
 export interface TodoRun {
@@ -121,6 +122,8 @@ export interface ListTodoInput {
     readonly search?: string;
     readonly limit?: number;
     readonly offset?: number;
+    /** When true, return archived todos; otherwise exclude them. */
+    readonly archived?: boolean;
 }
 /** Counts across the complete database, independent of list filters. */
 export interface TodoCounts {
@@ -130,6 +133,7 @@ export interface TodoCounts {
     readonly inReview: number;
     readonly completed: number;
     readonly cancelled: number;
+    readonly archived: number;
 }
 /** One bounded page plus global lifecycle counts. */
 export interface TodoListResult {

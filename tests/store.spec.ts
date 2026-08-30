@@ -68,11 +68,12 @@ describe('TodoStore', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
       completedAt: null,
+      archivedAt: null,
     })
     expect(todos.detail(todo.id).events).toMatchObject([{ type: 'created', message: null }])
     expect(todos.list()).toMatchObject({
       total: 1,
-      counts: { pending: 1, inProgress: 0, blocked: 0, inReview: 0, completed: 0, cancelled: 0 },
+      counts: { pending: 1, inProgress: 0, blocked: 0, inReview: 0, completed: 0, cancelled: 0, archived: 0 },
     })
   })
 
@@ -125,6 +126,59 @@ describe('TodoStore', () => {
       { id: 'run-1', sequence: 1, status: 'submitted' },
     ])
     expect(detail.todo.reviewRound).toBe(2)
+  })
+
+  it('archives completed todos outside lifecycle history and restores them', () => {
+    const todos = store({ times: Array.from({ length: 8 }, (_, index) => Date.UTC(2026, 0, index + 1)) })
+    const created = todos.create({ title: 'Archive me' })
+    todos.beginRun(created.id, 'run-1', 'session-1')
+    todos.submitReview({ id: created.id, summary: 'Ready' }, 'session-1')
+    todos.approve(created.id)
+
+    const archived = todos.archive(created.id)
+    expect(archived).toMatchObject({ status: 'completed', archivedAt: expect.any(String) })
+    expect(todos.list({ statuses: ['completed'] })).toMatchObject({ total: 0, counts: { completed: 0, archived: 1 } })
+    expect(todos.list({ statuses: ['completed'], archived: true })).toMatchObject({
+      total: 1,
+      todos: [{ id: created.id, archivedAt: archived.archivedAt }],
+      counts: { completed: 0, archived: 1 },
+    })
+    expect(() => todos.archive(created.id)).toThrow('already archived')
+
+    expect(todos.restore(created.id)).toMatchObject({ status: 'completed', archivedAt: null })
+    expect(todos.list({ statuses: ['completed'] })).toMatchObject({ total: 1, counts: { completed: 1, archived: 0 } })
+    expect(() => todos.restore(created.id)).toThrow('not archived')
+    expect(todos.detail(created.id).events.map(event => event.type).slice(0, 2)).toEqual(['restored', 'archived'])
+  })
+
+  it('archives in-progress todos without interrupting their Agent lifecycle', () => {
+    const todos = store({ times: Array.from({ length: 8 }, (_, index) => Date.UTC(2026, 1, index + 1)) })
+    const created = todos.create({ title: 'Still running' })
+    todos.beginRun(created.id, 'run-1', 'session-1')
+
+    expect(todos.archive(created.id)).toMatchObject({ status: 'in_progress', archivedAt: expect.any(String) })
+    expect(todos.list()).toMatchObject({ total: 0, counts: { inProgress: 0, archived: 1 } })
+    expect(todos.list({ archived: true })).toMatchObject({
+      total: 1,
+      todos: [{ id: created.id, status: 'in_progress' }],
+    })
+    expect(todos.progress(created.id, 'session-1', 'Work continued while archived')).toMatchObject({
+      status: 'in_progress',
+      archivedAt: expect.any(String),
+      latestSummary: 'Work continued while archived',
+    })
+    expect(todos.restore(created.id)).toMatchObject({ status: 'in_progress', archivedAt: null })
+    expect(todos.list()).toMatchObject({ total: 1, todos: [{ id: created.id }] })
+  })
+
+  it('permanently deletes archived todos regardless of lifecycle state', () => {
+    const todos = store()
+    const created = todos.create({ title: 'Delete from archive' })
+    todos.beginRun(created.id, 'run-1', 'session-1')
+    todos.archive(created.id)
+
+    expect(todos.delete(created.id)).toEqual({ id: created.id, deleted: true })
+    expect(() => todos.get(created.id)).toThrow('was not found')
   })
 
   it('links direct and nested Agent conversations to the owning todo', () => {
@@ -286,6 +340,7 @@ describe('TodoStore', () => {
 
     const migrated = store({ databasePath })
     expect(migrated.linkRelatedSession('root', 'child')).toMatchObject({ role: 'related', parentSessionId: 'root' })
+    expect(migrated.get('old')).toMatchObject({ archivedAt: null })
     expect(migrated.detail('old').sessions).toHaveLength(2)
   })
 

@@ -1,6 +1,6 @@
 /** SQLite owner for personal todo validation, ordering, and durable writes. */
 import type { BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoListResult, TodoSession, UpdateTodoPatch } from '../types.ts';
-export declare const PERSONAL_TODO_SCHEMA_VERSION = 3;
+export declare const PERSONAL_TODO_SCHEMA_VERSION = 4;
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist';
 export interface TodoStoreConfig {
     readonly databasePath: string;
@@ -31,6 +31,7 @@ export declare class TodoStore {
     private createSchema;
     private migrateV1;
     private migrateV2;
+    private migrateV3;
     private assertOpen;
     private transaction;
     private tagsFor;
@@ -73,6 +74,10 @@ export declare class TodoStore {
     requestChanges(request: RequestTodoChangesRequest, runId: string): Todo;
     /** Permanently delete one todo and its related records. */
     delete(id: string): DeleteTodoResult;
+    /** Move one todo out of its normal lifecycle list without changing its state. */
+    archive(id: string): Todo;
+    /** Restore one archived todo to the list for its current lifecycle state. */
+    restore(id: string): Todo;
     /** Return a bounded filtered page and unfiltered status counts. */
     list(input?: ListTodoInput): TodoListResult;
     private normalizeEnumFilter;

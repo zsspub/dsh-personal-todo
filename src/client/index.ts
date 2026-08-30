@@ -74,6 +74,16 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
           if (!result.ok) throw remoteFailure(result)
           return result.value
         },
+        archive: async (id, signal) => {
+          const result = await scope.remote.personalTodo.archive({ id }, signal)
+          if (!result.ok) throw remoteFailure(result)
+          return result.value
+        },
+        restore: async (id, signal) => {
+          const result = await scope.remote.personalTodo.restore({ id }, signal)
+          if (!result.ok) throw remoteFailure(result)
+          return result.value
+        },
         requestChanges: async (request, signal) => {
           const result = await scope.remote.personalTodo.requestChanges(request, signal)
           if (!result.ok) throw remoteFailure(result)

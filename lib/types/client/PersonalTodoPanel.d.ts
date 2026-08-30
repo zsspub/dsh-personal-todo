@@ -10,6 +10,8 @@ export interface PersonalTodoPanelInjected {
     readonly start: (id: string, signal: AbortSignal) => Promise<Todo>;
     readonly reply: (request: ReplyTodoRequest, signal: AbortSignal) => Promise<Todo>;
     readonly approve: (id: string, signal: AbortSignal) => Promise<Todo>;
+    readonly archive: (id: string, signal: AbortSignal) => Promise<Todo>;
+    readonly restore: (id: string, signal: AbortSignal) => Promise<Todo>;
     readonly requestChanges: (request: RequestTodoChangesRequest, signal: AbortSignal) => Promise<Todo>;
     readonly delete: (id: string, signal: AbortSignal) => Promise<DeleteTodoResult>;
     readonly openSession: (id: string, parentSessionId: string | null) => Promise<boolean>;

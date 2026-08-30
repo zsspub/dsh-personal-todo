@@ -55,6 +55,10 @@ export declare class PersonalTodoService extends TypertRemoteService {
     reply(request: ReplyTodoRequest, signal: AbortSignal): Promise<Todo>;
     /** Accept the latest Agent submission as complete. */
     approve(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
+    /** Move one todo to the archive without changing its lifecycle state. */
+    archive(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
+    /** Restore one archived todo to its lifecycle list. */
+    restore(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
     /** Return the reviewed todo to its root Session with user feedback. */
     requestChanges(request: RequestTodoChangesRequest, signal: AbortSignal): Promise<Todo>;
     /** Record one progress milestone from the todo's primary Agent Session. */

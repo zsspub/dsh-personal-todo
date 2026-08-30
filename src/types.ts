@@ -8,6 +8,7 @@ export const TODO_RUN_STATUSES = ['running', 'waiting_input', 'submitted', 'fail
 export const TODO_EVENT_TYPES = [
   'created', 'updated', 'run_started', 'progress', 'blocked', 'user_replied',
   'review_submitted', 'review_approved', 'changes_requested', 'run_failed', 'cancelled',
+  'archived', 'restored',
 ] as const
 
 export type TodoStatus = (typeof TODO_STATUSES)[number]
@@ -33,6 +34,7 @@ export interface Todo {
   readonly createdAt: string
   readonly updatedAt: string
   readonly completedAt: string | null
+  readonly archivedAt: string | null
 }
 
 /** One Agent execution cycle for a todo. */
@@ -144,6 +146,8 @@ export interface ListTodoInput {
   readonly search?: string
   readonly limit?: number
   readonly offset?: number
+  /** When true, return archived todos; otherwise exclude them. */
+  readonly archived?: boolean
 }
 
 /** Counts across the complete database, independent of list filters. */
@@ -154,6 +158,7 @@ export interface TodoCounts {
   readonly inReview: number
   readonly completed: number
   readonly cancelled: number
+  readonly archived: number
 }
 
 /** One bounded page plus global lifecycle counts. */

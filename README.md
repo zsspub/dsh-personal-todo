@@ -21,7 +21,8 @@ English | [中文](README.zh.md)
 - Explicit `pending`, `in_progress`, `blocked`, `in_review`, `completed`, and `cancelled` task states; only user approval completes a task.
 - Durable run, Session-link, and activity history alongside the current todo snapshot.
 - Agent tools for creation, query, editing, progress, blocking questions, review submission, and deletion.
-- A two-pane task center with inline blocked replies, review summaries, change requests, activity history, and conversation navigation.
+- A lifecycle-column task center with a right-side todo detail, inline blocked replies, review summaries, change requests, activity history, and conversation navigation.
+- Todos in any lifecycle state can move to a separate archive view, then return to the matching list or be permanently deleted.
 - Typed English and Chinese client dictionaries.
 
 ## Requirements
@@ -58,7 +59,7 @@ The bundle patch mounts the Host service and tools. Its Web manifest loads the c
 | `personal_todo_submit_review` | Submit a summary, verification, and remaining risk for user review. |
 | `personal_todo_delete` | Permanently delete one todo by UUID. |
 
-Lists show every active workflow state by default. Pass `statuses: ["completed"]` to read completed history. Lifecycle fields are changed only by start, block, reply, review, approval, and change-request commands; generic editing cannot bypass the review gate.
+Lists show every active workflow state and exclude archived records by default. Pass `statuses: ["completed"]` to read completed history. Pass `archived: true` to read archived active records, optionally combined with `statuses` to filter the archive. Lifecycle fields are changed only by start, block, reply, review, approval, and change-request commands; archiving preserves the current lifecycle state, does not interrupt a running Agent, and generic editing cannot bypass the review gate.
 
 ## Task flow
 
@@ -83,7 +84,7 @@ Override the generated plugin entry in the profile patch when deployment policy 
 
 Titles are trimmed and limited to 200 characters. Notes are trimmed and limited to 10,000 characters. A todo accepts up to 20 unique lowercase tags of at most 32 characters each. Due times must be RFC 3339 timestamps and are returned in canonical UTC form.
 
-Approving a todo sets `completedAt`. Completed records and their run, Session-link, and activity history remain until an explicit delete. Active ordering surfaces review and blocked items before running and pending work. Older databases migrate in place to the current task and related-conversation schema on first load.
+Approving a todo sets `completedAt`. Archiving sets `archivedAt` and removes the record from its normal list; restoring clears `archivedAt` and returns it according to its current lifecycle state. Archiving does not interrupt the Agent, and run, Session-link, and activity history remain until an explicit delete. Active ordering surfaces review and blocked items before running and pending work. Older databases migrate in place to the current task, archive, and related-conversation schema on first load.
 
 ## Development
 

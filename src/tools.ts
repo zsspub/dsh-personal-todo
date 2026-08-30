@@ -28,6 +28,7 @@ const TODO_SCHEMA = {
     createdAt: { type: 'string', required: true },
     updatedAt: { type: 'string', required: true },
     completedAt: { ...NULLABLE_STRING, required: true },
+    archivedAt: { ...NULLABLE_STRING, required: true },
   },
 } as const
 
@@ -60,7 +61,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'personal_todo_list',
-    description: 'List durable personal todos. By default returns every active workflow state; pass statuses to include completed history.',
+    description: 'List durable personal todos. By default returns every active workflow state and excludes archived history.',
     parameters: {
       statuses: {
         type: 'array',
@@ -77,6 +78,7 @@ export function apply(ctx: Context): void {
       search: { type: 'string', description: 'Case-insensitive title and notes search.' },
       limit: { type: 'integer', description: 'Page size; deployment maximum defaults to 200.' },
       offset: { type: 'integer', description: 'Zero-based row offset.' },
+      archived: { type: 'boolean', description: 'When true, return archived todos instead of normal history.' },
     },
     output: {
       schema: {
@@ -96,6 +98,7 @@ export function apply(ctx: Context): void {
               inReview: { type: 'integer', required: true },
               completed: { type: 'integer', required: true },
               cancelled: { type: 'integer', required: true },
+              archived: { type: 'integer', required: true },
             },
           },
           hasMore: { type: 'boolean', required: true },
@@ -186,7 +189,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'personal_todo_delete',
-    description: 'Permanently delete one personal todo by id. Completed tasks otherwise remain available as history.',
+    description: 'Permanently delete one personal todo by id. Archived todos may be deleted regardless of lifecycle state.',
     parameters: {
       id: { type: 'string', required: true, description: 'Todo id returned by add or list.' },
     },

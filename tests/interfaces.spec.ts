@@ -123,6 +123,10 @@ describe('Host Remote service and Agent tools', () => {
       properties: { todos: { type: 'array' }, total: { type: 'integer' }, hasMore: { type: 'boolean' } },
       required: ['todos', 'total', 'counts', 'hasMore'],
     })
+    expect(tools.get('personal_todo_list')?.parameters).toMatchObject({
+      type: 'object',
+      properties: { archived: { type: 'boolean' } },
+    })
   })
 
   it('drives one todo from creation through a Session and explicit user approval', async () => {
@@ -154,6 +158,10 @@ describe('Host Remote service and Agent tools', () => {
     const listed = await tools.get('personal_todo_list')?.execute({ statuses: ['completed'] } satisfies ListTodoInput, run())
     expect(listed).toMatchObject({ total: 1, counts: { completed: 1 }, todos: [{ id: added.id }] })
     expect(tools.get('personal_todo_list')?.output.render({}, listed)[0]?.text).toContain(added.id)
+
+    expect(await ctx.personalTodo.archive({ id: added.id }, signal)).toMatchObject({ archivedAt: expect.any(String) })
+    expect(await ctx.personalTodo.list({ statuses: ['completed'] }, signal)).toMatchObject({ total: 0, counts: { archived: 1 } })
+    expect(await ctx.personalTodo.restore({ id: added.id }, signal)).toMatchObject({ archivedAt: null })
   })
 
   it('tracks newly published child Sessions as related todo conversations', async () => {

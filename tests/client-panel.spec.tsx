@@ -61,6 +61,7 @@ function todo(overrides: Partial<Todo> = {}): Todo {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     completedAt: null,
+    archivedAt: null,
     ...overrides,
   }
 }
@@ -107,16 +108,19 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
       const statuses = request.statuses ?? ['pending', 'in_progress', 'blocked', 'in_review']
       const tags = request.tags ?? []
       const search = request.search?.toLowerCase()
+      const archived = request.archived === true
       const matching = rows.filter(row => statuses.includes(row.status)
+        && (row.archivedAt !== null) === archived
         && tags.every(tag => row.tags.includes(tag.toLowerCase()))
         && (search === undefined || `${row.title} ${row.notes ?? ''}`.toLowerCase().includes(search)))
       const counts: TodoCounts = {
-        pending: rows.filter(row => row.status === 'pending').length,
-        inProgress: rows.filter(row => row.status === 'in_progress').length,
-        blocked: rows.filter(row => row.status === 'blocked').length,
-        inReview: rows.filter(row => row.status === 'in_review').length,
-        completed: rows.filter(row => row.status === 'completed').length,
-        cancelled: rows.filter(row => row.status === 'cancelled').length,
+        pending: rows.filter(row => row.archivedAt === null && row.status === 'pending').length,
+        inProgress: rows.filter(row => row.archivedAt === null && row.status === 'in_progress').length,
+        blocked: rows.filter(row => row.archivedAt === null && row.status === 'blocked').length,
+        inReview: rows.filter(row => row.archivedAt === null && row.status === 'in_review').length,
+        completed: rows.filter(row => row.archivedAt === null && row.status === 'completed').length,
+        cancelled: rows.filter(row => row.archivedAt === null && row.status === 'cancelled').length,
+        archived: rows.filter(row => row.archivedAt !== null).length,
       }
       return { todos: matching.slice(request.offset ?? 0), total: matching.length, counts, hasMore: false }
     }),
@@ -159,6 +163,14 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
     approve: vi.fn(async (id, signal) => {
       signal.throwIfAborted()
       return replace(id, { status: 'completed', activeRunId: null, completedAt: '2026-01-02T00:00:00.000Z' })
+    }),
+    archive: vi.fn(async (id, signal) => {
+      signal.throwIfAborted()
+      return replace(id, { archivedAt: '2026-01-03T00:00:00.000Z' })
+    }),
+    restore: vi.fn(async (id, signal) => {
+      signal.throwIfAborted()
+      return replace(id, { archivedAt: null })
     }),
     requestChanges: vi.fn(async (request, signal) => {
       signal.throwIfAborted()
@@ -215,6 +227,29 @@ describe('PersonalTodoPanel', () => {
     expect(screen.queryByRole('dialog', { name: 'Personal Todos' })).toBeNull()
   })
 
+  it('groups active todos into lifecycle status columns', async () => {
+    const user = userEvent.setup()
+    const service = api([
+      todo({ id: 'pending', title: 'Pending task' }),
+      todo({ id: 'running', title: 'Running task', status: 'in_progress' }),
+      todo({ id: 'blocked', title: 'Blocked task', status: 'blocked' }),
+      todo({ id: 'review', title: 'Review task', status: 'in_review' }),
+    ])
+    render(<PersonalTodoPanel {...panelProps(service)} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+
+    for (const [heading, title] of [
+      ['Pending · 1', 'Pending task'],
+      ['In progress · 1', 'Running task'],
+      ['Waiting for me · 1', 'Blocked task'],
+      ['In review · 1', 'Review task'],
+    ] as const) {
+      const lane = (await screen.findByRole('heading', { name: heading })).closest('section')
+      expect(lane).not.toBeNull()
+      expect(within(lane as HTMLElement).getByRole('button', { name: new RegExp(title) })).toBeTruthy()
+    }
+  })
+
   it('creates, edits, starts, inspects, and opens the root execution conversation', async () => {
     const user = userEvent.setup()
     const service = api()
@@ -230,12 +265,13 @@ describe('PersonalTodoPanel', () => {
     expect(await screen.findByText('Write tests')).toBeTruthy()
     await waitFor(() => expect(service.start).toHaveBeenCalledWith('todo-1', expect.any(AbortSignal)))
 
+    await user.click(screen.getByRole('button', { name: /Write tests/ }))
     await user.click(screen.getByRole('button', { name: 'Edit' }))
     const title = screen.getByDisplayValue('Write tests')
     await user.clear(title)
     await user.type(title, 'Write browser tests')
     await user.click(screen.getByRole('button', { name: 'Save' }))
-    expect(await screen.findByText('Write browser tests')).toBeTruthy()
+    expect((await screen.findAllByText('Write browser tests')).length).toBe(2)
 
     await user.click(screen.getByRole('button', { name: /Write browser tests/ }))
     expect(await screen.findByText('Primary execution conversation')).toBeTruthy()
@@ -281,7 +317,9 @@ describe('PersonalTodoPanel', () => {
     await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
     expect((await screen.findAllByText('Which option?')).length).toBeGreaterThan(0)
-    await user.type(screen.getByRole('textbox', { name: 'Reply to Agent' }), 'Use option A')
+    const replyBox = screen.getByRole('textbox', { name: 'Reply to Agent' })
+    expect(replyBox.closest('.dsh-personal-todo-commandbar')).toBeTruthy()
+    await user.type(replyBox, 'Use option A')
     await user.click(screen.getByRole('button', { name: 'Reply and continue' }))
     await waitFor(() => expect(service.reply).toHaveBeenCalledWith({ id: 'todo-1', message: 'Use option A' }, expect.any(AbortSignal)))
     expect(service.rows[0]).toMatchObject({ status: 'in_progress', blockedReason: null })
@@ -298,7 +336,9 @@ describe('PersonalTodoPanel', () => {
     await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
     expect(await screen.findByText('Unit tests passed.')).toBeTruthy()
-    await user.type(screen.getByRole('textbox', { name: 'Change request' }), 'Add one edge case.')
+    const changeRequest = screen.getByRole('textbox', { name: 'Change request' })
+    expect(changeRequest.closest('.dsh-personal-todo-commandbar')).toBeTruthy()
+    await user.type(changeRequest, 'Add one edge case.')
     await user.click(screen.getByRole('button', { name: 'Request changes' }))
     await waitFor(() => expect(service.rows[0]).toMatchObject({ status: 'in_progress', latestSummary: 'Add one edge case.' }))
 
@@ -334,9 +374,12 @@ describe('PersonalTodoPanel', () => {
     const service = api([todo({ status: 'completed', completedAt: '2026-01-02T00:00:00.000Z' })])
     render(<PersonalTodoPanel {...panelProps(service)} />)
     await user.click(screen.getByRole('button', { name: /personal todos/i }))
-    await user.click(screen.getByRole('button', { name: 'Completed' }))
+    expect(screen.queryByRole('textbox', { name: 'Filter by tags' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: /Completed/ }))
+    await user.click(screen.getByRole('button', { name: 'Filters' }))
     await user.type(screen.getByRole('textbox', { name: 'Filter by tags' }), 'work')
     await user.click(screen.getByRole('button', { name: 'Apply filters' }))
+    expect(screen.queryByRole('textbox', { name: 'Filter by tags' })).toBeNull()
     await waitFor(() => expect(service.list).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['work'] }), expect.any(AbortSignal)))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
     await user.click(await screen.findByRole('button', { name: 'Delete' }))
@@ -344,6 +387,70 @@ describe('PersonalTodoPanel', () => {
     expect(within(dialog).getByText(/permanently deleted/)).toBeTruthy()
     await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(service.rows).toHaveLength(0))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Delete todo' })).toBeNull())
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(service.get).toHaveBeenCalledTimes(1)
+  })
+
+  it('archives completed todos and restores them from the archive view', async () => {
+    const user = userEvent.setup()
+    const service = api([todo({ status: 'completed', completedAt: '2026-01-02T00:00:00.000Z' })])
+    render(<PersonalTodoPanel {...panelProps(service)} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    await user.click(screen.getByRole('button', { name: 'Completed' }))
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    await user.click(screen.getAllByRole('button', { name: 'Archive' })[1] as HTMLElement)
+    await waitFor(() => expect(service.rows[0]).toMatchObject({ archivedAt: expect.any(String) }))
+    expect(await screen.findByText('No completed history yet.')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Archive' }))
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    expect(await screen.findByText(/Archived/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Restore' }))
+    await waitFor(() => expect(service.rows[0]).toMatchObject({ archivedAt: null }))
+    expect(await screen.findByText('No archived history yet.')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('archives in-progress todos while preserving their lifecycle state', async () => {
+    const user = userEvent.setup()
+    const service = api([todo({
+      status: 'in_progress', primarySessionId: 'session-1', activeRunId: 'run-1',
+    })])
+    render(<PersonalTodoPanel {...panelProps(service)} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    await user.click(screen.getAllByRole('button', { name: 'Archive' })[1] as HTMLElement)
+    expect(await screen.findByText('No active todos.')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Archive' }))
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    expect((await screen.findAllByText('In progress')).length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: 'Restore' }))
+    expect(await screen.findByText('No archived history yet.')).toBeTruthy()
+    expect(service.rows[0]).toMatchObject({ status: 'in_progress', archivedAt: null })
+  })
+
+  it('deletes an archived in-progress todo from its details', async () => {
+    const user = userEvent.setup()
+    const service = api([todo({
+      status: 'in_progress',
+      primarySessionId: 'session-1',
+      activeRunId: 'run-1',
+      archivedAt: '2026-01-03T00:00:00.000Z',
+    })])
+    render(<PersonalTodoPanel {...panelProps(service)} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    await user.click(screen.getByRole('button', { name: 'Archive' }))
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    expect(screen.getByRole('button', { name: 'Restore' })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    const dialog = screen.getByRole('dialog', { name: 'Delete todo' })
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+    await waitFor(() => expect(service.rows).toHaveLength(0))
+    expect(await screen.findByText('No archived history yet.')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('shows load failures and aborts an in-flight read when the panel closes', async () => {
