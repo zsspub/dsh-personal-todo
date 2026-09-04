@@ -176,6 +176,16 @@ export class PersonalTodoService extends TypertRemoteService {
     return this.orchestrator.requestChanges(request)
   }
 
+  /** Return exact source fields for delegation by the active primary Agent Session. */
+  delegationSource(id: string, sessionId: string): Todo {
+    return this.store.delegationSource(id, sessionId)
+  }
+
+  /** Return the active todo linked to one Session, when present. */
+  activeTodoForSession(sessionId: string): Todo | undefined {
+    return this.store.activeTodoForSession(sessionId)
+  }
+
   /** Record one progress milestone from the todo's primary Agent Session. */
   reportProgress(request: ReportTodoProgressRequest, sessionId: string): Promise<Todo> {
     return Promise.resolve(this.store.progress(request.id, sessionId, request.message))

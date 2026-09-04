@@ -12,7 +12,7 @@ import type {
 } from '../types.ts'
 import { TODO_PRIORITIES, TODO_STATUSES } from '../types.ts'
 
-export const PERSONAL_TODO_SCHEMA_VERSION = 4
+export const PERSONAL_TODO_SCHEMA_VERSION = 5
 
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 
@@ -34,6 +34,7 @@ interface TodoRow {
   readonly id: string
   readonly title: string
   readonly notes: string | null
+  readonly assignee: string | null
   readonly status: TodoStatus
   readonly priority: TodoPriority
   readonly due_at: number | null
@@ -122,6 +123,13 @@ function normalizeNotes(value: string | null | undefined): string | null {
   const notes = value.trim()
   if (notes.length > 10_000) throw new PersonalTodoError('notes must contain at most 10000 characters')
   return notes.length === 0 ? null : notes
+}
+
+function normalizeAssignee(value: string | null | undefined): string | null {
+  if (value == null) return null
+  const assignee = value.trim()
+  if (assignee.length > 100) throw new PersonalTodoError('assignee must contain at most 100 characters')
+  return assignee.length === 0 ? null : assignee
 }
 
 function normalizeOptionalText(name: string, value: string | null | undefined): string | null {
@@ -229,7 +237,11 @@ export class TodoStore {
       this.migrateV2()
       version = 3
     }
-    if (version === 3) this.migrateV3()
+    if (version === 3) {
+      this.migrateV3()
+      version = 4
+    }
+    if (version === 4) this.migrateV4()
   }
 
   private createSchema(): void {
@@ -239,6 +251,7 @@ export class TodoStore {
           id                 TEXT PRIMARY KEY,
           title              TEXT NOT NULL,
           notes              TEXT,
+          assignee           TEXT,
           status             TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'blocked', 'in_review', 'completed', 'cancelled')),
           priority           TEXT NOT NULL CHECK (priority IN ('none', 'low', 'medium', 'high')),
           due_at             INTEGER,
@@ -293,7 +306,7 @@ export class TodoStore {
         CREATE INDEX todo_tags_tag_idx ON todo_tags(tag, todo_id);
         CREATE INDEX todo_runs_todo_idx ON todo_runs(todo_id, sequence DESC);
         CREATE INDEX todo_events_todo_idx ON todo_events(todo_id, created_at DESC);
-        PRAGMA user_version = 4;
+        PRAGMA user_version = 5;
       `)
     })
   }
@@ -411,6 +424,15 @@ export class TodoStore {
     }
   }
 
+  private migrateV4(): void {
+    this.transaction(() => {
+      this.database.exec(`
+        ALTER TABLE todos ADD COLUMN assignee TEXT;
+        PRAGMA user_version = 5;
+      `)
+    })
+  }
+
   private assertOpen(): void {
     if (this.closed) throw new PersonalTodoError('personal todo database is closed')
   }
@@ -441,6 +463,7 @@ export class TodoStore {
       id: row.id,
       title: row.title,
       notes: row.notes,
+      assignee: row.assignee,
       status: row.status,
       priority: row.priority,
       dueAt: iso(row.due_at),
@@ -496,7 +519,7 @@ export class TodoStore {
 
   private find(id: string): TodoRow | undefined {
     return this.database.prepare(`
-      SELECT id, title, notes, status, priority, due_at, primary_session_id, active_run_id,
+      SELECT id, title, notes, assignee, status, priority, due_at, primary_session_id, active_run_id,
              latest_summary, blocked_reason, review_round, revision, created_at, updated_at, completed_at, archived_at
       FROM todos WHERE id = ?
     `).get(id) as TodoRow | undefined
@@ -541,6 +564,32 @@ export class TodoStore {
     return this.todoFromRow(this.requireRow(id))
   }
 
+  /** Return the active todo owned by one Session in its linked conversation tree. */
+  activeTodoForSession(sessionId: string): Todo | undefined {
+    this.assertOpen()
+    const row = this.database.prepare(`
+      SELECT t.id, t.title, t.notes, t.assignee, t.status, t.priority, t.due_at, t.primary_session_id,
+             t.active_run_id, t.latest_summary, t.blocked_reason, t.review_round, t.revision,
+             t.created_at, t.updated_at, t.completed_at, t.archived_at
+      FROM todos t
+      INNER JOIN todo_sessions s ON s.todo_id = t.id
+      WHERE s.session_id = ?
+        AND t.status IN ('in_progress', 'blocked', 'in_review')
+        AND t.active_run_id IS NOT NULL
+      LIMIT 1
+    `).get(sessionId) as TodoRow | undefined
+    return row === undefined ? undefined : this.todoFromRow(row)
+  }
+
+  /** Return exact source fields for delegation by the active primary Session. */
+  delegationSource(id: string, sessionId: string): Todo {
+    this.assertOpen()
+    const row = this.requireRow(id)
+    this.requireStatus(row, 'in_progress')
+    this.requireOwnedRun(row, sessionId)
+    return this.todoFromRow(row)
+  }
+
   /** Return one todo with its durable execution history. */
   detail(id: string): TodoDetail {
     this.assertOpen()
@@ -574,6 +623,7 @@ export class TodoStore {
       id: this.createId(),
       title: normalizeTitle(input.title),
       notes: normalizeNotes(input.notes),
+      assignee: normalizeAssignee(input.assignee),
       status: 'pending',
       priority: normalizePriority(input.priority),
       due_at: parseTimestamp('dueAt', input.dueAt),
@@ -592,11 +642,11 @@ export class TodoStore {
     this.transaction(() => {
       this.database.prepare(`
         INSERT INTO todos (
-          id, title, notes, status, priority, due_at, primary_session_id, active_run_id,
+          id, title, notes, assignee, status, priority, due_at, primary_session_id, active_run_id,
           latest_summary, blocked_reason, review_round, revision, created_at, updated_at, completed_at, archived_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        row.id, row.title, row.notes, row.status, row.priority, row.due_at, null, null,
+        row.id, row.title, row.notes, row.assignee, row.status, row.priority, row.due_at, null, null,
         null, null, 0, 0, timestamp, timestamp, null, null,
       )
       const insertTag = this.database.prepare('INSERT INTO todo_tags (todo_id, tag) VALUES (?, ?)')
@@ -609,7 +659,7 @@ export class TodoStore {
   /** Replace supplied editable fields and return the durable todo. */
   update(id: string, patch: UpdateTodoPatch): Todo {
     this.assertOpen()
-    const mutableKeys = ['title', 'notes', 'priority', 'dueAt', 'tags'] as const
+    const mutableKeys = ['title', 'notes', 'assignee', 'priority', 'dueAt', 'tags'] as const
     if (!mutableKeys.some(key => Object.hasOwn(patch, key))) {
       throw new PersonalTodoError('todo update must include at least one editable field')
     }
@@ -619,6 +669,7 @@ export class TodoStore {
       ...current,
       title: Object.hasOwn(patch, 'title') ? normalizeTitle(patch.title as string) : current.title,
       notes: Object.hasOwn(patch, 'notes') ? normalizeNotes(patch.notes) : current.notes,
+      assignee: Object.hasOwn(patch, 'assignee') ? normalizeAssignee(patch.assignee) : current.assignee,
       priority: Object.hasOwn(patch, 'priority') ? normalizePriority(patch.priority) : current.priority,
       due_at: Object.hasOwn(patch, 'dueAt') ? parseTimestamp('dueAt', patch.dueAt) : current.due_at,
       revision: current.revision + 1,
@@ -627,8 +678,8 @@ export class TodoStore {
     const tags = Object.hasOwn(patch, 'tags') ? normalizeTags(patch.tags) : this.tagsFor(id)
     this.transaction(() => {
       this.database.prepare(`
-        UPDATE todos SET title = ?, notes = ?, priority = ?, due_at = ?, revision = ?, updated_at = ? WHERE id = ?
-      `).run(row.title, row.notes, row.priority, row.due_at, row.revision, timestamp, id)
+        UPDATE todos SET title = ?, notes = ?, assignee = ?, priority = ?, due_at = ?, revision = ?, updated_at = ? WHERE id = ?
+      `).run(row.title, row.notes, row.assignee, row.priority, row.due_at, row.revision, timestamp, id)
       if (Object.hasOwn(patch, 'tags')) {
         this.database.prepare('DELETE FROM todo_tags WHERE todo_id = ?').run(id)
         const insertTag = this.database.prepare('INSERT INTO todo_tags (todo_id, tag) VALUES (?, ?)')
@@ -704,7 +755,7 @@ export class TodoStore {
   recoverableTodos(): Todo[] {
     this.assertOpen()
     const rows = this.database.prepare(`
-      SELECT id, title, notes, status, priority, due_at, primary_session_id,
+      SELECT id, title, notes, assignee, status, priority, due_at, primary_session_id,
              active_run_id, latest_summary, blocked_reason, review_round, revision,
              created_at, updated_at, completed_at, archived_at
       FROM todos
@@ -939,13 +990,13 @@ export class TodoStore {
     }
     if (search !== undefined && search.length > 0) {
       const pattern = `%${escapeLike(search.toLocaleLowerCase())}%`
-      where.push("(lower(t.title) LIKE ? ESCAPE '\\' OR lower(COALESCE(t.notes, '')) LIKE ? ESCAPE '\\')")
-      parameters.push(pattern, pattern)
+      where.push("(lower(t.title) LIKE ? ESCAPE '\\' OR lower(COALESCE(t.notes, '')) LIKE ? ESCAPE '\\' OR lower(COALESCE(t.assignee, '')) LIKE ? ESCAPE '\\')")
+      parameters.push(pattern, pattern, pattern)
     }
     const predicate = where.join(' AND ')
     const totalRow = this.database.prepare(`SELECT COUNT(*) AS total FROM todos t WHERE ${predicate}`).get(...parameters) as { total: number }
     const rows = this.database.prepare(`
-      SELECT t.id, t.title, t.notes, t.status, t.priority, t.due_at, t.primary_session_id,
+      SELECT t.id, t.title, t.notes, t.assignee, t.status, t.priority, t.due_at, t.primary_session_id,
              t.active_run_id, t.latest_summary, t.blocked_reason, t.review_round, t.revision,
              t.created_at, t.updated_at, t.completed_at, t.archived_at
       FROM todos t

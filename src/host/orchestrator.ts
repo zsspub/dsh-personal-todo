@@ -35,16 +35,16 @@ interface TodoOrchestratorConfig {
 
 function taskPrompt(todo: Todo): string {
   const notes = todo.notes === null ? 'No additional notes.' : todo.notes
+  const assignee = todo.assignee === null ? 'Unassigned.' : todo.assignee
   return [
     `Execute personal todo ${todo.id}.`,
     `Title: ${todo.title}`,
     `Notes: ${notes}`,
+    `Assignee: ${assignee}`,
     '',
+    'Load and follow the personal-todo-execution skill before acting; it is the full procedure for this run.',
     'Work autonomously within the current DSH permissions and execution context.',
-    'When the delegate tool or an equivalent subagent tool is available, use it for independent workstreams that benefit from separate related conversations; delegated conversations are linked to this todo automatically.',
-    `Use personal_todo_progress with id ${todo.id} for meaningful milestones.`,
-    `If user input is required, call personal_todo_block with id ${todo.id} and the exact question.`,
-    `When the requested outcome is ready, call personal_todo_submit_review with id ${todo.id}, a concise summary, verification performed, and remaining risks.`,
+    `Report meaningful milestones with personal_todo_progress (id ${todo.id}); if user input is required, call personal_todo_block (id ${todo.id}) with the exact question; when the outcome is ready, call personal_todo_submit_review (id ${todo.id}) with a concise summary, verification performed, and remaining risks.`,
     'Do not mark the todo completed; only the user may approve it.',
   ].join('\n')
 }

@@ -21,7 +21,7 @@ read_when:
 - 使用 `pending`、`in_progress`、`blocked`、`in_review`、`completed` 和 `cancelled` 状态；只有用户审核能完成任务。
 - 在当前待办快照之外持久保存 Run、Session 关联和活动记录。
 - 提供创建、查询、编辑、进度、阻塞提问、提交审核和删除 Agent 工具。
-- 提供按生命周期状态分栏的任务中心、右侧待办详情、待办内回复、审核摘要、修改意见、活动记录和会话跳转。
+- 提供非模态右侧 Canvas：顶部活动状态 Tab 显示各自数量，新建、刷新和更多操作独立成行，搜索与标签筛选表单始终显示，“更多”菜单收纳已完成、已取消和归档待办；当前状态下的卡片按负责人分组，描述最多显示两行，点击卡片查看详情，并支持待办内回复、审核摘要、修改意见、活动记录和会话跳转。
 - 任意生命周期状态的待办都可移入独立归档视图，并可恢复到对应列表或永久删除。
 - 提供 typed 中英文 Client 字典。
 
@@ -51,10 +51,11 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 
 | 工具 | 用途 |
 | --- | --- |
-| `personal_todo_add` | 新建待办，并可设置备注、状态、优先级、截止时间和标签。 |
+| `personal_todo_add` | 新建待办，并可设置备注、负责人、状态、优先级、截止时间和标签。 |
 | `personal_todo_list` | 筛选和分页查询待办，返回匹配记录、总数、全局状态计数和 `hasMore`。 |
-| `personal_todo_update` | 替换任意已提供的可变字段；`null` 清空备注或截止时间，`[]` 清空标签。 |
+| `personal_todo_update` | 替换任意已提供的可变字段；`null` 清空备注、负责人或截止时间，`[]` 清空标签。 |
 | `personal_todo_progress` | 由待办主 Agent Session 记录一项有意义的进度。 |
+| `personal_todo_delegate_codex` | 可选 Codex 委派服务存在时，用数据库中的标题和备注派发任务，不接受模型编写的 Prompt；调用方只能提供 `id` 和 `cwd`。 |
 | `personal_todo_block` | 暂停执行，并在任务中心显示一个待回答问题。 |
 | `personal_todo_submit_review` | 提交完成摘要、验证结果和遗留风险供用户审核。 |
 | `personal_todo_delete` | 按 UUID 永久删除一条待办。 |
@@ -63,7 +64,7 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 
 ## 任务流程
 
-在 Web 任务中心创建待办会立即开始执行。启动任意待处理待办会创建或接管一个确定的普通 Session，并把任务说明发送给 Agent。Agent 可以使用部署提供的 `delegate` 或等价 subagent 工具拆分独立工作；DSH 发布子 Session 时，插件会把该子会话及其嵌套后代关联到待办。Agent 可以记录进度，在缺少输入时提交明确问题，并把结果流转到 `in_review`。侧栏计数会直接提示等待回复和待审核工作，无需先打开任务中心。DSH 进程重启后，插件会恢复 Agent 尚未运行的持久化 `in_progress` Run。审核通过后进入 `completed`；提出修改意见会在同一个主会话中创建新的 Run，并返回 `in_progress`。
+在 Web 任务中心创建待办会立即开始执行。启动任意待处理待办会创建或接管一个确定的普通 Session，并把任务说明发送给 Agent。明确要求 Codex 执行的待办使用 `personal_todo_delegate_codex`：Host 序列化数据库中的标题和备注，单调 Tool guard 会拒绝活动主 Session 及所有关联后代直接调用 `codex_task`。其他任务可以使用 delegate 或等价 subagent 工具拆分独立工作；DSH 发布子 Session 时，插件会把该子会话及其嵌套后代关联到待办。Agent 可以记录进度，在缺少输入时提交明确问题，并把结果流转到 `in_review`。侧栏计数会直接提示等待回复和待审核工作，无需先打开任务中心。DSH 进程重启后，插件会恢复 Agent 尚未运行的持久化 `in_progress` Run。审核通过后进入 `completed`；提出修改意见会在同一个主会话中创建新的 Run，并返回 `in_progress`。
 
 ## 配置
 
@@ -82,7 +83,7 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 
 ## 数据行为
 
-标题会去除首尾空白，最多 200 个字符。备注会去除首尾空白，最多 10,000 个字符。每条待办最多包含 20 个唯一的小写标签，每个标签最多 32 个字符。截止时间必须是 RFC 3339 时间，并以规范 UTC 格式返回。
+标题会去除首尾空白，最多 200 个字符。备注会去除首尾空白，最多 10,000 个字符。负责人可选，去除首尾空白后最多 100 个字符；未设置负责人的待办显示在具名负责人分组之后的“未分配”组。每条待办最多包含 20 个唯一的小写标签，每个标签最多 32 个字符。截止时间必须是 RFC 3339 时间，并以规范 UTC 格式返回。
 
 审核通过会设置 `completedAt`。归档会设置 `archivedAt` 并把记录移出原列表；恢复会清空 `archivedAt`，记录随当前生命周期状态回到对应列表。归档不会中断 Agent，Run、Session 关联和活动历史会一直保留，直到显式删除。活动列表优先显示待审核和等待回复的任务，再显示执行中和待处理任务。旧数据库会在首次加载时原地迁移到当前的任务、归档和相关对话 schema。
 

@@ -1,6 +1,6 @@
 /** SQLite owner for personal todo validation, ordering, and durable writes. */
 import type { BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoListResult, TodoSession, UpdateTodoPatch } from '../types.ts';
-export declare const PERSONAL_TODO_SCHEMA_VERSION = 4;
+export declare const PERSONAL_TODO_SCHEMA_VERSION = 5;
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist';
 export interface TodoStoreConfig {
     readonly databasePath: string;
@@ -32,6 +32,7 @@ export declare class TodoStore {
     private migrateV1;
     private migrateV2;
     private migrateV3;
+    private migrateV4;
     private assertOpen;
     private transaction;
     private tagsFor;
@@ -46,6 +47,10 @@ export declare class TodoStore {
     private appendEvent;
     /** Return one todo snapshot or fail for an unknown id. */
     get(id: string): Todo;
+    /** Return the active todo owned by one Session in its linked conversation tree. */
+    activeTodoForSession(sessionId: string): Todo | undefined;
+    /** Return exact source fields for delegation by the active primary Session. */
+    delegationSource(id: string, sessionId: string): Todo;
     /** Return one todo with its durable execution history. */
     detail(id: string): TodoDetail;
     /** Create and durably return one normalized pending todo. */

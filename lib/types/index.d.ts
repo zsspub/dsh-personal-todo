@@ -61,6 +61,10 @@ export declare class PersonalTodoService extends TypertRemoteService {
     restore(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
     /** Return the reviewed todo to its root Session with user feedback. */
     requestChanges(request: RequestTodoChangesRequest, signal: AbortSignal): Promise<Todo>;
+    /** Return exact source fields for delegation by the active primary Agent Session. */
+    delegationSource(id: string, sessionId: string): Todo;
+    /** Return the active todo linked to one Session, when present. */
+    activeTodoForSession(sessionId: string): Todo | undefined;
     /** Record one progress milestone from the todo's primary Agent Session. */
     reportProgress(request: ReportTodoProgressRequest, sessionId: string): Promise<Todo>;
     /** Pause one todo on a question from its primary Agent Session. */

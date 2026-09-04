@@ -46,6 +46,7 @@ describe('TodoStore', () => {
     const todo = todos.create({
       title: '  Ship plugin  ',
       notes: '  finish the README  ',
+      assignee: '  Alice  ',
       dueAt: '2026-03-04T05:06:07+08:00',
       priority: 'high',
       tags: [' Work ', 'work', 'THIS-WEEK'],
@@ -55,6 +56,7 @@ describe('TodoStore', () => {
       id: 'todo-1',
       title: 'Ship plugin',
       notes: 'finish the README',
+      assignee: 'Alice',
       status: 'pending',
       priority: 'high',
       dueAt: '2026-03-03T21:06:07.000Z',
@@ -242,9 +244,9 @@ describe('TodoStore', () => {
 
   it('filters, orders workflow states, paginates, and preserves editable metadata', () => {
     const todos = store({ ids: ['pending', 'working', 'blocked', 'reviewed'], times: [1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000] })
-    todos.create({ title: 'Pending', priority: 'high', tags: ['work'] })
-    const working = todos.create({ title: 'Working', tags: ['work'] })
-    const blocked = todos.create({ title: 'Blocked', tags: ['work', 'input'] })
+    todos.create({ title: 'Pending', assignee: 'Alice', priority: 'high', tags: ['work'] })
+    const working = todos.create({ title: 'Working', assignee: 'Bob', tags: ['work'] })
+    const blocked = todos.create({ title: 'Blocked', assignee: 'Alice', tags: ['work', 'input'] })
     const reviewed = todos.create({ title: 'Reviewed', tags: ['work'] })
     todos.beginRun(working.id, 'run-working', 'session-working')
     todos.beginRun(blocked.id, 'run-blocked', 'session-blocked')
@@ -254,8 +256,9 @@ describe('TodoStore', () => {
 
     expect(todos.list({ tags: ['work'] }).todos.map(todo => todo.id)).toEqual(['reviewed', 'blocked', 'working', 'pending'])
     expect(todos.list({ statuses: ['blocked'], tags: ['INPUT'] }).todos.map(todo => todo.id)).toEqual(['blocked'])
-    expect(todos.update(working.id, { notes: '  updated  ', priority: 'medium', tags: [] })).toMatchObject({
-      status: 'in_progress', notes: 'updated', priority: 'medium', tags: [], revision: 2,
+    expect(todos.list({ search: 'alice' }).todos.map(todo => todo.id)).toEqual(['blocked', 'pending'])
+    expect(todos.update(working.id, { notes: '  updated  ', assignee: null, priority: 'medium', tags: [] })).toMatchObject({
+      status: 'in_progress', notes: 'updated', assignee: null, priority: 'medium', tags: [], revision: 2,
     })
     expect(todos.list({ limit: 2 })).toMatchObject({ total: 4, hasMore: true })
   })
@@ -344,6 +347,43 @@ describe('TodoStore', () => {
     expect(migrated.detail('old').sessions).toHaveLength(2)
   })
 
+  it('migrates version-four todos with an unassigned owner', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'dsh-personal-todo-v4-'))
+    const databasePath = join(directory, 'todos.sqlite3')
+    const database = new DatabaseSync(databasePath)
+    database.exec(`
+      CREATE TABLE todos (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, notes TEXT,
+        status TEXT NOT NULL, priority TEXT NOT NULL, due_at INTEGER,
+        primary_session_id TEXT, active_run_id TEXT, latest_summary TEXT, blocked_reason TEXT,
+        review_round INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER, archived_at INTEGER
+      ) STRICT;
+      CREATE TABLE todo_tags (
+        todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        tag TEXT NOT NULL, PRIMARY KEY (todo_id, tag)
+      ) STRICT;
+      CREATE TABLE todo_runs (
+        id TEXT PRIMARY KEY, todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        sequence INTEGER NOT NULL, status TEXT NOT NULL, root_session_id TEXT NOT NULL,
+        result_summary TEXT, verification TEXT, risk TEXT, started_at INTEGER NOT NULL,
+        finished_at INTEGER, UNIQUE (todo_id, sequence)
+      ) STRICT;
+      CREATE TABLE todo_events (
+        id TEXT PRIMARY KEY, todo_id TEXT NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+        run_id TEXT REFERENCES todo_runs(id) ON DELETE CASCADE,
+        type TEXT NOT NULL, message TEXT, created_at INTEGER NOT NULL
+      ) STRICT;
+      INSERT INTO todos VALUES ('old', 'Existing task', NULL, 'pending', 'none', NULL, NULL, NULL, NULL, NULL, 0, 0, 1000, 1000, NULL, NULL);
+      PRAGMA user_version = 4;
+    `)
+    database.close()
+
+    const migrated = store({ databasePath })
+    expect(migrated.get('old')).toMatchObject({ title: 'Existing task', assignee: null })
+    expect(migrated.update('old', { assignee: ' Alice ' })).toMatchObject({ assignee: 'Alice' })
+  })
+
   it('persists through reopen with an owner-only database and current schema version', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dsh-personal-todo-'))
     const databasePath = join(directory, 'nested', 'todos.sqlite3')
@@ -366,6 +406,7 @@ describe('TodoStore', () => {
       { title: '   ' },
       { title: 'x'.repeat(201) },
       { title: 'x', notes: 'n'.repeat(10_001) },
+      { title: 'x', assignee: 'a'.repeat(101) },
       { title: 'x', dueAt: 'tomorrow' },
       { title: 'x', tags: Array.from({ length: 21 }, (_, index) => String(index)) },
       { title: 'x', tags: ['x'.repeat(33)] },

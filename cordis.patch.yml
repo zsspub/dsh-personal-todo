@@ -10,3 +10,6 @@
 
     - id: personal-todo-tools
       name: dsh-personal-todo/tools
+
+    - id: personal-todo-execution-skill
+      name: dsh-personal-todo/execution-skill

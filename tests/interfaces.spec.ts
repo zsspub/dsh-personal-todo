@@ -5,7 +5,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import PersonalTodoService from '../src/index.ts'
 import { TodoStore } from '../src/host/store.ts'
-import { apply as applyTools } from '../src/tools.ts'
+import { apply as applyTools, codexDelegationPrompt } from '../src/tools.ts'
 import type { CreateTodoInput, ListTodoInput, UpdateTodoRequest } from '../src/types.ts'
 
 interface ToolRun {
@@ -20,8 +20,19 @@ interface CapturedTool {
   readonly output: {
     readonly schema: Record<string, unknown>
     render(args: unknown, value: unknown): Array<{ readonly type: string; readonly text?: string }>
+    presentationMeta?(args: unknown, value: unknown): unknown
   }
   execute(args: unknown, run: ToolRun): Promise<unknown>
+}
+
+interface CodexDelegateStub {
+  readonly genericToolName: string
+  dispatch(request: unknown): Promise<{
+    readonly kind: 'background'
+    readonly jobId: string
+    readonly threadId: string
+    readonly codexUrl: string
+  }>
 }
 
 class SessionControllerStub extends Service {
@@ -64,7 +75,11 @@ const contexts: Context[] = []
 const temporaryDirectories: string[] = []
 const signal = new AbortController().signal
 
-async function setup(databasePath = ':memory:', agentStatus: 'idle' | 'running' = 'idle') {
+async function setup(
+  databasePath = ':memory:',
+  agentStatus: 'idle' | 'running' = 'idle',
+  codexDelegate?: CodexDelegateStub,
+) {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(SessionControllerStub)
@@ -77,14 +92,28 @@ async function setup(databasePath = ':memory:', agentStatus: 'idle' | 'running' 
     maxListLimit: 200,
   })
   const tools: CapturedTool[] = []
-  applyTools({
+  const guards: Array<(exec: { readonly name: string; readonly agent?: { readonly id: string } }) => string | undefined> = []
+  const toolContext = {
     personalTodo: ctx.personalTodo,
-    tools: { register: (tool: CapturedTool) => { tools.push(tool); return () => undefined } },
-  } as unknown as Context)
+    tools: {
+      register: (tool: CapturedTool) => { tools.push(tool); return () => undefined },
+      guard: (guard: (exec: { readonly name: string; readonly agent?: { readonly id: string } }) => string | undefined) => {
+        guards.push(guard)
+        return () => undefined
+      },
+    },
+    get: (name: string) => name === 'codexDelegate' ? codexDelegate : undefined,
+    inject: (names: readonly string[], register: (scope: Context) => void) => {
+      if (names.includes('codexDelegate') && codexDelegate !== undefined) register(toolContext as unknown as Context)
+      return undefined
+    },
+  }
+  applyTools(toolContext as unknown as Context)
   return {
     ctx,
     sessions: ctx.sessionController as unknown as SessionControllerStub,
     tools: new Map(tools.map(tool => [tool.name, tool])),
+    guards,
   }
 }
 
@@ -115,7 +144,7 @@ describe('Host Remote service and Agent tools', () => {
     ])
     expect(tools.get('personal_todo_add')?.parameters).toMatchObject({
       type: 'object',
-      properties: { title: { type: 'string' } },
+      properties: { title: { type: 'string' }, assignee: { oneOf: [{ type: 'string' }, { type: 'null' }] } },
       required: ['title'],
     })
     expect(tools.get('personal_todo_list')?.output.schema).toMatchObject({
@@ -129,20 +158,83 @@ describe('Host Remote service and Agent tools', () => {
     })
   })
 
+  it('delegates exact stored todo text and denies direct Codex bypasses', async () => {
+    const dispatch = vi.fn().mockResolvedValue({
+      kind: 'background',
+      jobId: 'codex-1',
+      threadId: 'thread-1',
+      codexUrl: 'codex://threads/thread-1',
+    })
+    const delegate: CodexDelegateStub = { genericToolName: 'codex_task', dispatch }
+    const { ctx, tools, guards } = await setup(':memory:', 'idle', delegate)
+    const added = await ctx.personalTodo.create({
+      title: 'Audit sharing',
+      notes: 'Keep this exact\nsecond line',
+    }, signal)
+    const started = await ctx.personalTodo.start({ id: added.id }, signal)
+    const primaryId = started.primarySessionId as string
+    const tool = tools.get('personal_todo_delegate_codex')
+
+    expect(tool?.parameters).toMatchObject({
+      properties: { id: { type: 'string' }, cwd: { type: 'string' } },
+      required: ['id'],
+    })
+    const value = await tool?.execute({ id: added.id, cwd: '/workspace/kiwis2' }, run(primaryId))
+    const expectedPrompt = codexDelegationPrompt(added)
+    expect(dispatch).toHaveBeenCalledWith({
+      label: added.title,
+      prompt: expectedPrompt,
+      owner: { id: primaryId },
+      signal,
+      cwd: '/workspace/kiwis2',
+    })
+    expect(value).toMatchObject({
+      description: added.title,
+      source: {
+        title: added.title,
+        notes: added.notes,
+        revision: started.revision,
+        prompt: expectedPrompt,
+      },
+    })
+    expect(tool?.output.presentationMeta?.({}, value)).toMatchObject({
+      kind: 'codex-task',
+      description: added.title,
+      source: { prompt: expectedPrompt },
+    })
+
+    await expect(tool?.execute({ id: added.id, prompt: 'rewritten' }, run(primaryId)))
+      .rejects.toThrow(/accepts only id and cwd/)
+    expect(dispatch).toHaveBeenCalledTimes(1)
+
+    ctx.emit('session/created', {
+      id: 'child-1',
+      header: { parentSession: primaryId },
+    } as never)
+    expect(guards).toHaveLength(1)
+    expect(guards[0]?.({ name: 'codex_task', agent: { id: primaryId } })).toMatch(/must use personal_todo_delegate_codex/)
+    expect(guards[0]?.({ name: 'codex_task', agent: { id: 'child-1' } })).toMatch(/return the work to the primary Session/)
+    expect(guards[0]?.({ name: 'codex_task', agent: { id: 'unrelated' } })).toBeUndefined()
+    await expect(tool?.execute({ id: added.id }, run('child-1'))).rejects.toThrow(/does not own todo/)
+  })
+
   it('drives one todo from creation through a Session and explicit user approval', async () => {
     const { ctx, sessions, tools } = await setup()
     const added = await tools.get('personal_todo_add')?.execute({
       title: 'Shared state',
       notes: 'created by a tool',
+      assignee: 'Alice',
       priority: 'high',
       tags: ['DSH'],
     } satisfies CreateTodoInput, run()) as Awaited<ReturnType<typeof ctx.personalTodo.create>>
 
     const started = await ctx.personalTodo.start({ id: added.id }, signal)
-    expect(started).toMatchObject({ status: 'in_progress', primarySessionId: expect.any(String) })
+    expect(started).toMatchObject({ assignee: 'Alice', status: 'in_progress', primarySessionId: expect.any(String) })
     expect(sessions.created).toEqual([started.primarySessionId])
-    expect(sessions.messages[0]?.text).toContain(`personal_todo_submit_review with id ${added.id}`)
-    expect(sessions.messages[0]?.text).toContain('delegate tool')
+    expect(sessions.messages[0]?.text).toContain(`personal_todo_submit_review (id ${added.id})`)
+    expect(sessions.messages[0]?.text).toContain('Assignee: Alice')
+    expect(sessions.messages[0]?.text).toContain('personal-todo-execution skill')
+    expect(sessions.messages[0]?.text).toContain('Do not mark the todo completed')
 
     const agentRun = run(started.primarySessionId as string)
     expect(await tools.get('personal_todo_progress')?.execute({ id: added.id, message: 'Implemented it' }, agentRun)).toMatchObject({ latestSummary: 'Implemented it' })

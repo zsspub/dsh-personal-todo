@@ -12,6 +12,7 @@ export interface Todo {
     readonly id: string;
     readonly title: string;
     readonly notes: string | null;
+    readonly assignee: string | null;
     readonly status: TodoStatus;
     readonly priority: TodoPriority;
     readonly dueAt: string | null;
@@ -68,6 +69,7 @@ export interface TodoDetail {
 export interface CreateTodoInput {
     readonly title: string;
     readonly notes?: string | null;
+    readonly assignee?: string | null;
     readonly priority?: TodoPriority;
     readonly dueAt?: string | null;
     readonly tags?: readonly string[];
@@ -76,6 +78,7 @@ export interface CreateTodoInput {
 export interface UpdateTodoPatch {
     readonly title?: string;
     readonly notes?: string | null;
+    readonly assignee?: string | null;
     readonly priority?: TodoPriority;
     readonly dueAt?: string | null;
     readonly tags?: readonly string[];

@@ -21,7 +21,7 @@ English | [中文](README.zh.md)
 - Explicit `pending`, `in_progress`, `blocked`, `in_review`, `completed`, and `cancelled` task states; only user approval completes a task.
 - Durable run, Session-link, and activity history alongside the current todo snapshot.
 - Agent tools for creation, query, editing, progress, blocking questions, review submission, and deletion.
-- A lifecycle-column task center with a right-side todo detail, inline blocked replies, review summaries, change requests, activity history, and conversation navigation.
+- A non-modal right-side Canvas with counted active-status tabs, a dedicated New/Refresh/More action row, always-visible search and tag filters, assignee-grouped todo cards, two-line card summaries, click-through todo details, inline blocked replies, review summaries, change requests, activity history, and conversation navigation.
 - Todos in any lifecycle state can move to a separate archive view, then return to the matching list or be permanently deleted.
 - Typed English and Chinese client dictionaries.
 
@@ -51,10 +51,11 @@ The bundle patch mounts the Host service and tools. Its Web manifest loads the c
 
 | Tool | Purpose |
 | --- | --- |
-| `personal_todo_add` | Create a todo with optional notes, status, priority, due time, and tags. |
+| `personal_todo_add` | Create a todo with optional notes, assignee, status, priority, due time, and tags. |
 | `personal_todo_list` | Filter and page todos; returns matching rows, total, global status counts, and `hasMore`. |
-| `personal_todo_update` | Replace any supplied mutable fields; `null` clears notes or due time and `[]` clears tags. |
+| `personal_todo_update` | Replace any supplied mutable fields; `null` clears notes, assignee, or due time and `[]` clears tags. |
 | `personal_todo_progress` | Record a meaningful milestone from the todo's primary Agent Session. |
+| `personal_todo_delegate_codex` | When the optional Codex delegate service is present, dispatch the stored title and notes with no model-authored prompt; only `id` and `cwd` are accepted. |
 | `personal_todo_block` | Pause execution and surface one question in the task center. |
 | `personal_todo_submit_review` | Submit a summary, verification, and remaining risk for user review. |
 | `personal_todo_delete` | Permanently delete one todo by UUID. |
@@ -63,7 +64,7 @@ Lists show every active workflow state and exclude archived records by default. 
 
 ## Task flow
 
-Creating a todo in the Web task center starts it immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. The Agent may use the deployment's `delegate` tool or an equivalent subagent tool for independent workstreams; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. The sidebar count surfaces blocked and review-ready work without opening the task center. After a DSH process restart, the plugin resumes durable `in_progress` runs whose Agent is not already running. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
+Creating a todo in the Web task center starts it immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. A todo that explicitly assigns the work to Codex uses `personal_todo_delegate_codex`: the Host serializes the stored title and notes, while a monotonic Tool guard denies direct `codex_task` calls from the active primary Session and every linked descendant. Other tasks may use a delegate or equivalent subagent for independent workstreams; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. The sidebar count surfaces blocked and review-ready work without opening the task center. After a DSH process restart, the plugin resumes durable `in_progress` runs whose Agent is not already running. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
 
 ## Configuration
 
@@ -82,7 +83,7 @@ Override the generated plugin entry in the profile patch when deployment policy 
 
 ## Data behavior
 
-Titles are trimmed and limited to 200 characters. Notes are trimmed and limited to 10,000 characters. A todo accepts up to 20 unique lowercase tags of at most 32 characters each. Due times must be RFC 3339 timestamps and are returned in canonical UTC form.
+Titles are trimmed and limited to 200 characters. Notes are trimmed and limited to 10,000 characters. Assignees are optional, trimmed, and limited to 100 characters; unassigned todos appear in a dedicated group after named assignees. A todo accepts up to 20 unique lowercase tags of at most 32 characters each. Due times must be RFC 3339 timestamps and are returned in canonical UTC form.
 
 Approving a todo sets `completedAt`. Archiving sets `archivedAt` and removes the record from its normal list; restoring clears `archivedAt` and returns it according to its current lifecycle state. Archiving does not interrupt the Agent, and run, Session-link, and activity history remain until an explicit delete. Active ordering surfaces review and blocked items before running and pending work. Older databases migrate in place to the current task, archive, and related-conversation schema on first load.
 
