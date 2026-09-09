@@ -5,7 +5,7 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import {
   Button, Menu, Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { Archive, ArrowDown, ArrowLeft, CalendarDays, ChevronRight, ChevronsUp, CircleCheck, CircleDashed, CircleDot, CircleX, ClipboardCheck, ClipboardList, Ellipsis, Equal, Flag, GitBranch, ListTodo, LoaderCircle, MessageCircle, MessageSquare, Pencil, Play, Plus, Tag, Trash2, Undo2, UserRound, X } from 'lucide-react'
+import { Archive, ArrowDown, ArrowLeft, CalendarDays, ChevronRight, ChevronsUp, CircleCheck, CircleDashed, CircleDot, CircleX, ClipboardCheck, ClipboardList, Copy, Ellipsis, Equal, Flag, GitBranch, ListTodo, LoaderCircle, MessageCircle, MessageSquare, Pencil, Play, Plus, Tag, Trash2, Undo2, UserRound, X } from 'lucide-react'
 import type {
   CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest,
   RequestTodoChangesRequest, Todo, TodoDetail, TodoEventType, TodoListResult,
@@ -425,6 +425,27 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     void fetchDetail(id)
   }
 
+  const copyTodo = (source: Todo): void => {
+    if (busy) return
+    let copied: Todo | undefined
+    void mutate(async (signal) => {
+      // 仅传入元信息，由创建接口初始化独立的状态和历史。
+      copied = await create({
+        title: source.title,
+        notes: source.notes,
+        assignee: source.assignee,
+        priority: source.priority,
+        dueAt: source.dueAt,
+        tags: [...source.tags],
+      }, signal)
+      signal.throwIfAborted()
+    }, false).then((saved) => {
+      if (!saved || copied === undefined) return
+      setView('pending')
+      selectTodo(copied.id)
+    })
+  }
+
   const saveForm = (startAfterCreate: boolean): void => {
     if (busy || form === undefined || form.title.trim() === '') return
     const creating = form.id === undefined
@@ -619,6 +640,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
                   {detail.todo.status === 'pending' && <Button className="dsh-personal-todo-new" size="sm" variant="primary" icon={<Play size={14} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => start(detail.todo.id, signal)) }}>{t('action.start')}</Button>}
                   {detail.todo.primarySessionId !== null && <Button size="sm" variant="primary" onClick={() => { openConversation(detail.todo.primarySessionId as string, null) }}>{t('action.openConversation')}</Button>}
                   <Button size="sm" variant="ghost" icon={<Pencil size={16} aria-hidden="true" />} disabled={busy} onClick={() => { setForm(formOf(detail.todo)) }}>{t('action.edit')}</Button>
+                  <Button size="sm" variant="ghost" icon={<Copy size={16} aria-hidden="true" />} disabled={busy} onClick={() => { copyTodo(detail.todo) }}>{t('action.copy')}</Button>
                   {detail.todo.archivedAt === null && <Button size="sm" variant="ghost" icon={<Archive size={14} aria-hidden="true" />} disabled={busy} onClick={() => {
                     void mutate(signal => archive(detail.todo.id, signal), false).then((saved) => {
                       if (saved) { setSelectedId(undefined); setDetail(undefined) }

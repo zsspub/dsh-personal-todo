@@ -12,6 +12,7 @@ export declare const zh: {
     'action.more': string;
     'action.add': string;
     'action.edit': string;
+    'action.copy': string;
     'action.start': string;
     'action.openConversation': string;
     'action.reply': string;
@@ -119,6 +120,7 @@ export declare const en: {
     'action.more': string;
     'action.add': string;
     'action.edit': string;
+    'action.copy': string;
     'action.start': string;
     'action.openConversation': string;
     'action.reply': string;

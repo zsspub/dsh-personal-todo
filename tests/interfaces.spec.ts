@@ -157,10 +157,14 @@ describe('Host Remote service and Agent tools', () => {
     const started = await ctx.personalTodo.start({ id: added.id }, signal)
     expect(started).toMatchObject({ assignee: 'Alice', status: 'in_progress', primarySessionId: expect.any(String) })
     expect(sessions.created).toEqual([started.primarySessionId])
-    expect(sessions.messages[0]?.text).toContain(`personal_todo_submit_review (id ${added.id})`)
-    expect(sessions.messages[0]?.text).toContain('Assignee: Alice')
-    expect(sessions.messages[0]?.text).toContain('personal-todo-execution skill')
-    expect(sessions.messages[0]?.text).toContain('Do not mark the todo completed')
+    expect(sessions.messages[0]?.text).toBe([
+      `执行个人待办 ${added.id}。`,
+      '执行前请加载并遵循 personal-todo-execution Skill。',
+      '',
+      '标题：Shared state',
+      '备注：created by a tool',
+      '负责人：Alice',
+    ].join('\n'))
 
     const agentRun = run(started.primarySessionId as string)
     expect(await tools.get('personal_todo_progress')?.execute({ id: added.id, message: 'Implemented it' }, agentRun)).toMatchObject({ latestSummary: 'Implemented it' })
@@ -221,7 +225,7 @@ describe('Host Remote service and Agent tools', () => {
     await vi.waitFor(() => { expect(sessions.messages).toHaveLength(1) })
     expect(sessions.created).toEqual([])
     expect(sessions.messages[0]).toMatchObject({ sessionId: 'session-1' })
-    expect(sessions.messages[0]?.text).toContain('after the DSH service restart')
+    expect(sessions.messages[0]?.text).toContain('DSH 服务重启后')
     expect(await ctx.personalTodo.get({ id: todo.id }, signal)).toMatchObject({ todo: { status: 'in_progress' } })
   })
 

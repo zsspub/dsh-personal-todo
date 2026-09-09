@@ -238,6 +238,66 @@ afterEach(() => {
 })
 
 describe('PersonalTodoCanvas', () => {
+  it.each(['pending', 'in_progress', 'blocked', 'in_review', 'completed', 'cancelled', 'archived'] as const)('复制 %s 待办时只保留元信息并打开新的待处理待办', async (state) => {
+    const user = userEvent.setup()
+    const source = todo({
+      status: state === 'archived' ? 'completed' : state,
+      assignee: '张三',
+      dueAt: '2026-09-20T10:00:00.000Z',
+      primarySessionId: 'old-session',
+      activeRunId: 'old-run',
+      latestSummary: '旧进度',
+      blockedReason: '旧阻塞',
+      reviewRound: 3,
+      revision: 9,
+      completedAt: '2026-09-01T10:00:00.000Z',
+      archivedAt: state === 'archived' ? '2026-09-02T10:00:00.000Z' : null,
+    })
+    const service = api([source])
+    render(<TodoSurface service={service} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    if (state === 'completed' || state === 'cancelled' || state === 'archived') {
+      await user.click(screen.getByRole('button', { name: 'More' }))
+      await user.click(screen.getByRole('menuitem', { name: state === 'archived' ? 'Archive 1' : state === 'completed' ? 'Completed 1' : 'Cancelled 1' }))
+    } else if (state !== 'pending') {
+      await user.click(await screen.findByRole('tab', { name: state === 'in_progress' ? 'In progress 1' : state === 'blocked' ? 'Waiting for me 1' : 'In review 1' }))
+    }
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    await user.click(await screen.findByRole('button', { name: 'Duplicate todo' }))
+    await waitFor(() => { expect(service.rows).toHaveLength(2) })
+    expect(service.create).toHaveBeenCalledWith({
+      title: source.title, notes: source.notes, assignee: source.assignee,
+      priority: source.priority, dueAt: source.dueAt, tags: source.tags,
+    }, expect.any(AbortSignal))
+    expect(service.rows[0]).toEqual(source)
+    expect(service.rows[1]).toMatchObject({
+      id: 'todo-2', status: 'pending', primarySessionId: null, activeRunId: null,
+      latestSummary: null, blockedReason: null, reviewRound: 0, revision: 0,
+      completedAt: null, archivedAt: null,
+    })
+    expect(service.start).not.toHaveBeenCalled()
+    expect((await screen.findAllByRole('button', { name: 'Start' })).length).toBeGreaterThan(0)
+    expect(service.get).toHaveBeenCalledWith('todo-2', expect.any(AbortSignal))
+    expect(document.querySelector('.dsh-personal-todo-detail-actions')?.textContent).not.toContain('Open conversation')
+    await user.click(screen.getByRole('button', { name: 'Back to list' }))
+    expect(screen.getByRole('tab', { name: /^Pending/ }).getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('复制失败时保留原待办并允许重试', async () => {
+    const user = userEvent.setup()
+    const source = todo()
+    const service = api([source])
+    vi.mocked(service.create).mockRejectedValueOnce(new Error('复制失败'))
+    render(<TodoSurface service={service} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    await user.click(await screen.findByRole('button', { name: 'Duplicate todo' }))
+    expect(await screen.findByText(/复制失败/)).toBeTruthy()
+    expect(service.rows).toEqual([source])
+    await user.click(screen.getByRole('button', { name: 'Duplicate todo' }))
+    await waitFor(() => { expect(service.rows).toHaveLength(2) })
+  })
+
   it('closes on outside clicks and toggles from the sidebar without retaining an open form', async () => {
     const user = userEvent.setup()
     const service = api()

@@ -34,31 +34,28 @@ interface TodoOrchestratorConfig {
 }
 
 function taskPrompt(todo: Todo): string {
-  const notes = todo.notes === null ? 'No additional notes.' : todo.notes
-  const assignee = todo.assignee === null ? 'Unassigned.' : todo.assignee
+  const notes = todo.notes === null ? '无补充备注。' : todo.notes
+  const assignee = todo.assignee === null ? '未分配。' : todo.assignee
   return [
-    `Execute personal todo ${todo.id}.`,
-    `Title: ${todo.title}`,
-    `Notes: ${notes}`,
-    `Assignee: ${assignee}`,
+    `执行个人待办 ${todo.id}。`,
+    '执行前请加载并遵循 personal-todo-execution Skill。',
     '',
-    'Load and follow the personal-todo-execution skill before acting; it is the full procedure for this run.',
-    'Work autonomously within the current DSH permissions and execution context.',
-    `Report meaningful milestones with personal_todo_progress (id ${todo.id}); if user input is required, call personal_todo_block (id ${todo.id}) with the exact question; when the outcome is ready, call personal_todo_submit_review (id ${todo.id}) with a concise summary, verification performed, and remaining risks.`,
-    'Do not mark the todo completed; only the user may approve it.',
+    `标题：${todo.title}`,
+    `备注：${notes}`,
+    `负责人：${assignee}`,
   ].join('\n')
 }
 
 function replyPrompt(todoId: string, message: string): string {
-  return `The user replied to the blocked personal todo ${todoId}:\n\n${message}\n\nContinue the task and submit it for review when ready.`
+  return `用户已回复阻塞中的个人待办 ${todoId}：\n\n${message}\n\n请继续执行任务，结果准备就绪后提交审核。`
 }
 
 function changesPrompt(todoId: string, feedback: string): string {
-  return `The user requested changes for personal todo ${todoId}:\n\n${feedback}\n\nApply the feedback, report meaningful progress, and submit a new review when ready.`
+  return `用户要求修改个人待办 ${todoId}：\n\n${feedback}\n\n请根据反馈调整，汇报有意义的进展，并在结果准备就绪后重新提交审核。`
 }
 
 function recoveryPrompt(todoId: string): string {
-  return `Resume personal todo ${todoId} after the DSH service restart. Inspect the existing conversation before acting, continue only unfinished work, and submit the result for review when ready.`
+  return `DSH 服务重启后，恢复执行个人待办 ${todoId}。执行前请查看已有对话，仅继续未完成的工作，结果准备就绪后提交审核。`
 }
 
 /** 启动和恢复每条待办所属的唯一普通根会话。 */
