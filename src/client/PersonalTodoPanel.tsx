@@ -18,10 +18,19 @@ import type { NS } from './locales.ts'
 // 插槽渲染器为列表插槽设置内联 display: contents。
 // 宽侧栏下将包裹层恢复为布局容器，使每个底部操作独占一行。
 const CSS = `
-.dsh-personal-todo-trigger{position:relative;min-width:28px}
-.dsh-personal-todo-attention{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-left:auto;padding:0 5px;border-radius:9px;background:var(--dsw-alias-label-error);color:var(--dsw-alias-bg-layer-1);font-size:11px;line-height:18px}
+/* 对齐宿主 ui-settings-general 的入口尺寸、留白和交互颜色。 */
+.dsh-personal-todo-trigger-row{flex:none;display:flex;align-items:center;gap:8px;width:calc(100% + 4px);margin:0 -2px}
+.dsh-personal-todo-trigger-row[data-wide=false]{width:36px;margin:0}
+.dsh-personal-todo-trigger{position:relative;flex:1;min-width:0;display:flex;align-items:center;gap:8px;width:auto;height:42px;margin:0;padding:0 10px 0 8px;box-sizing:border-box;border:0;border-radius:12px;background:transparent;cursor:pointer;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;font-weight:400;line-height:22px;text-align:left}
+.dsh-personal-todo-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-personal-todo-trigger:focus-visible{outline:2px solid var(--dsw-alias-brand-primary-new-colorprimary-new-color);outline-offset:2px}
+.dsh-personal-todo-trigger>svg{flex:none}
+.dsh-personal-todo-trigger-label{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.dsh-personal-todo-trigger[data-wide=false]{flex:none;width:36px;height:36px;justify-content:center;gap:0;padding:0;border-radius:50%;corner-shape:round}
+.dsh-personal-todo-attention{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-left:auto;padding:0 5px;border-radius:9px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);font-size:11px;line-height:18px}
 .dsh-personal-todo-trigger[data-wide=false] .dsh-personal-todo-attention{position:absolute;top:-3px;right:-3px;min-width:16px;height:16px;padding:0 4px;line-height:16px}
 [data-slot='sidebar.footer.action']:has(.dsh-personal-todo-trigger[data-wide=true]){display:flex!important;flex:1;flex-direction:column;min-width:0;width:100%}
+[data-slot='sidebar.footer.action']:has(.dsh-personal-todo-trigger[data-wide=false]){display:flex!important;flex-direction:column;align-items:center}
 .dsh-personal-todo-trigger[data-wide=true]{justify-content:flex-start;width:100%}
 .dsh-personal-todo-canvas{position:absolute;top:8px;right:8px;bottom:8px;z-index:1;display:flex;box-sizing:border-box;width:440px;max-width:calc(100% - 16px);min-width:0;flex-direction:column;overflow:hidden;pointer-events:auto;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:16px;box-shadow:var(--dsw-shadow-lv3,0 12px 40px rgb(0 0 0 / 28%))}
 .dsh-personal-todo-canvas-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:16px 20px 14px;border-bottom:1px solid var(--dsw-alias-border-l2)}
@@ -222,22 +231,23 @@ export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, closeCa
   return (
     <>
       <style>{CSS}</style>
-      <Button
-        className="dsh-personal-todo-trigger"
-        variant="ghost"
-        size="sm"
-        icon={<ListTodo size={16} aria-hidden="true" />}
-        aria-label={triggerLabel}
-        title={triggerLabel}
-        data-wide={wide}
-        aria-expanded={snapshot.open}
-        onClick={snapshot.open ? closeCanvas : openCanvas}
-      >
-        {wide ? <span>{t('trigger.label')}</span> : null}
-        {snapshot.attentionCount > 0 && (
-          <span className="dsh-personal-todo-attention" aria-hidden="true">{snapshot.attentionCount}</span>
-        )}
-      </Button>
+      <div className="dsh-personal-todo-trigger-row" data-wide={wide}>
+        <button
+          type="button"
+          className="dsh-personal-todo-trigger"
+          aria-label={triggerLabel}
+          title={triggerLabel}
+          data-wide={wide}
+          aria-expanded={snapshot.open}
+          onClick={snapshot.open ? closeCanvas : openCanvas}
+        >
+          <ListTodo size={wide ? 16 : 18} aria-hidden="true" />
+          {wide ? <span className="dsh-personal-todo-trigger-label">{t('trigger.label')}</span> : null}
+          {snapshot.attentionCount > 0 && (
+            <span className="dsh-personal-todo-attention" aria-hidden="true">{snapshot.attentionCount}</span>
+          )}
+        </button>
+      </div>
     </>
   )
 }
@@ -525,7 +535,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
         <header className="dsh-personal-todo-canvas-header">
           <div className="dsh-personal-todo-canvas-heading">
             <div className="dsh-personal-todo-heading-row">
-              {selectedId !== undefined && form === undefined && <button type="button" className="dsh-personal-todo-back" aria-label={t('action.back')} title={t('action.back')} onClick={() => { setSelectedId(undefined); setDetail(undefined) }}><ArrowLeft size={18} aria-hidden="true" /></button>}
+              {((selectedId !== undefined && form === undefined) || (form !== undefined && form.id === undefined)) && <button type="button" className="dsh-personal-todo-back" aria-label={t('action.back')} title={t('action.back')} onClick={() => { setForm(undefined); setSelectedId(undefined); setDetail(undefined) }}><ArrowLeft size={18} aria-hidden="true" /></button>}
               <h2>{form === undefined ? selectedId === undefined ? t('panel.title') : t('detail.title') : form.id === undefined ? t('action.add') : t('action.edit')}</h2>
             </div>
             {(selectedId === undefined || form !== undefined) && <p>{form === undefined ? t('panel.description') : form.id === undefined ? t('form.description') : t('form.editDescription')}</p>}
@@ -686,7 +696,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
             </>}
             </section>
             {form !== undefined && <div className="dsh-personal-todo-form-actions">
-              <Button variant="outline" onClick={() => { setForm(undefined) }}>{t('action.cancel')}</Button>
+              {form.id !== undefined && <Button variant="outline" onClick={() => { setForm(undefined) }}>{t('action.cancel')}</Button>}
               {form.id === undefined && <Button variant="outline" disabled={busy || form.title.trim() === ''} onClick={() => { saveForm(false) }}>{t('action.createOnly')}</Button>}
               <Button className="dsh-personal-todo-new" variant="primary" disabled={busy || form.title.trim() === ''} onClick={() => { saveForm(form.id === undefined) }}>{form.id === undefined ? t('action.create') : t('action.save')}</Button>
             </div>}
