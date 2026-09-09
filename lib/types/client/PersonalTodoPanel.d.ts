@@ -22,7 +22,7 @@ export interface PersonalTodoPanelInjected {
 }
 export type PersonalTodoTriggerProps = PropsRuntime<'sidebar.footer.action'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected;
 export type PersonalTodoCanvasProps = PropsRuntime<'shell.overlay'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected;
-/** Sidebar action opening the task Canvas and surfacing attention work. */
+/** 打开待办面板并提示待处理事项的侧栏入口。 */
 export declare function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, closeCanvas }: PersonalTodoTriggerProps): React.JSX.Element;
-/** Task-driven personal todo drawer floating in the shell overlay. */
+/** 悬浮在 shell.overlay 图层中的个人待办抽屉。 */
 export declare function PersonalTodoCanvas(props: PersonalTodoCanvasProps): React.JSX.Element | null;

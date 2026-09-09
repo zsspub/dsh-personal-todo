@@ -24,7 +24,7 @@ function categoryPath(query: string): { category: Category; search: string } | u
   return { category: match[1] as Category, search: match[2]! }
 }
 
-/** Status folders drill into live Host todos; references resolve again when sent. */
+/** 通过状态文件夹逐级浏览 Host 中的实时待办；发送引用时重新读取记录。 */
 export function createTodoInputSource(api: TodoInputApi, t: (key: PersonalTodoKey) => string): InputTriggerSource {
   return {
     trigger: '@',

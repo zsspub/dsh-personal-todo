@@ -1,4 +1,4 @@
-/** SQLite owner for personal todo validation, ordering, and durable writes. */
+/** 负责个人待办校验、排序和持久化写入的 SQLite 存储层。 */
 
 import { randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync } from 'node:fs'
@@ -84,7 +84,7 @@ const STATUS_SET = new Set<string>(TODO_STATUSES)
 const PRIORITY_SET = new Set<string>(TODO_PRIORITIES)
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/u
 
-/** Stable domain failure surfaced through tools and Remote calls. */
+/** 通过工具与 Remote 调用返回的统一业务错误。 */
 export class PersonalTodoError extends Error {
   constructor(message: string) {
     super(message)
@@ -181,7 +181,7 @@ function assertDatabasePath(path: string): void {
   }
 }
 
-/** Synchronous SQLite repository. Each public mutation is one database transaction. */
+/** 同步 SQLite 存储库；每个公开写入操作均在一个数据库事务中完成。 */
 export class TodoStore {
   private readonly database: DatabaseSync
   private readonly now: () => number
@@ -558,39 +558,13 @@ export class TodoStore {
     `).run(this.createEventId(), todoId, runId, type, message, timestamp)
   }
 
-  /** Return one todo snapshot or fail for an unknown id. */
+  /** 返回待办快照；标识符不存在时抛出错误。 */
   get(id: string): Todo {
     this.assertOpen()
     return this.todoFromRow(this.requireRow(id))
   }
 
-  /** Return the active todo owned by one Session in its linked conversation tree. */
-  activeTodoForSession(sessionId: string): Todo | undefined {
-    this.assertOpen()
-    const row = this.database.prepare(`
-      SELECT t.id, t.title, t.notes, t.assignee, t.status, t.priority, t.due_at, t.primary_session_id,
-             t.active_run_id, t.latest_summary, t.blocked_reason, t.review_round, t.revision,
-             t.created_at, t.updated_at, t.completed_at, t.archived_at
-      FROM todos t
-      INNER JOIN todo_sessions s ON s.todo_id = t.id
-      WHERE s.session_id = ?
-        AND t.status IN ('in_progress', 'blocked', 'in_review')
-        AND t.active_run_id IS NOT NULL
-      LIMIT 1
-    `).get(sessionId) as TodoRow | undefined
-    return row === undefined ? undefined : this.todoFromRow(row)
-  }
-
-  /** Return exact source fields for delegation by the active primary Session. */
-  delegationSource(id: string, sessionId: string): Todo {
-    this.assertOpen()
-    const row = this.requireRow(id)
-    this.requireStatus(row, 'in_progress')
-    this.requireOwnedRun(row, sessionId)
-    return this.todoFromRow(row)
-  }
-
-  /** Return one todo with its durable execution history. */
+  /** 返回待办及其持久化执行历史。 */
   detail(id: string): TodoDetail {
     this.assertOpen()
     const todo = this.todoFromRow(this.requireRow(id))
@@ -615,7 +589,7 @@ export class TodoStore {
     }
   }
 
-  /** Create and durably return one normalized pending todo. */
+  /** 规范化并持久化一条待处理待办，返回保存结果。 */
   create(input: CreateTodoInput): Todo {
     this.assertOpen()
     const timestamp = this.now()
@@ -656,7 +630,7 @@ export class TodoStore {
     return { ...this.todoFromRow(row), tags }
   }
 
-  /** Replace supplied editable fields and return the durable todo. */
+  /** 替换指定的可编辑字段，返回持久化后的待办。 */
   update(id: string, patch: UpdateTodoPatch): Todo {
     this.assertOpen()
     const mutableKeys = ['title', 'notes', 'assignee', 'priority', 'dueAt', 'tags'] as const
@@ -690,7 +664,7 @@ export class TodoStore {
     return { ...this.todoFromRow(row), tags }
   }
 
-  /** Claim a pending todo and create its first Agent execution cycle. */
+  /** 认领一条待处理待办，并创建其首轮 Agent 执行周期。 */
   beginRun(id: string, runId: string, sessionId: string): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
@@ -718,7 +692,7 @@ export class TodoStore {
     return this.get(id)
   }
 
-  /** Attach one child Session when its direct parent already belongs to a todo. */
+  /** 直接父会话已关联待办时，将子会话关联到同一待办。 */
   linkRelatedSession(parentSessionId: string, sessionId: string): TodoSession | undefined {
     this.assertOpen()
     const parent = this.database.prepare(`
@@ -751,7 +725,7 @@ export class TodoStore {
     return this.sessionFromRow(row)
   }
 
-  /** Return running todos whose existing root Sessions need process-start recovery. */
+  /** 返回服务启动后需要在原根会话中恢复的执行中待办。 */
   recoverableTodos(): Todo[] {
     this.assertOpen()
     const rows = this.database.prepare(`
@@ -765,7 +739,7 @@ export class TodoStore {
     return rows.map(row => this.todoFromRow(row))
   }
 
-  /** Return a failed initial dispatch to pending while retaining its audit record. */
+  /** 将初始派发失败的待办恢复为待处理，并保留审计记录。 */
   failRun(id: string, runId: string, message: string): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
@@ -783,7 +757,7 @@ export class TodoStore {
     return this.get(id)
   }
 
-  /** Record progress from the todo's primary Agent Session. */
+  /** 记录待办主 Agent 会话汇报的进度。 */
   progress(id: string, sessionId: string, message: string): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
@@ -800,7 +774,7 @@ export class TodoStore {
     return this.get(id)
   }
 
-  /** Pause an in-progress todo on an Agent-authored user question. */
+  /** 根据 Agent 提出的用户问题暂停执行中的待办。 */
   block(request: BlockTodoRequest, sessionId: string): Todo {
     this.assertOpen()
     const current = this.requireRow(request.id)
@@ -819,7 +793,7 @@ export class TodoStore {
     return this.get(request.id)
   }
 
-  /** Resume a blocked todo after the user supplies an answer. */
+  /** 用户回复后恢复被阻塞的待办。 */
   reply(request: ReplyTodoRequest): Todo {
     this.assertOpen()
     const current = this.requireRow(request.id)
@@ -838,7 +812,7 @@ export class TodoStore {
     return this.get(request.id)
   }
 
-  /** Submit Agent results for explicit user review. */
+  /** 提交 Agent 结果，等待用户明确审核。 */
   submitReview(request: SubmitTodoReviewRequest, sessionId: string): Todo {
     this.assertOpen()
     const current = this.requireRow(request.id)
@@ -862,7 +836,7 @@ export class TodoStore {
     return this.get(request.id)
   }
 
-  /** Accept the latest Agent submission as complete. */
+  /** 批准 Agent 最近一次提交，并将待办标记为完成。 */
   approve(id: string): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
@@ -878,7 +852,7 @@ export class TodoStore {
     return this.get(id)
   }
 
-  /** Return a reviewed todo to its primary Session in a new execution cycle. */
+  /** 在原主会话中创建新一轮执行，处理用户修改意见。 */
   requestChanges(request: RequestTodoChangesRequest, runId: string): Todo {
     this.assertOpen()
     const current = this.requireRow(request.id)
@@ -906,7 +880,7 @@ export class TodoStore {
     return this.get(request.id)
   }
 
-  /** Permanently delete one todo and its related records. */
+  /** 永久删除待办及其关联记录。 */
   delete(id: string): DeleteTodoResult {
     this.assertOpen()
     const current = this.requireRow(id)
@@ -919,7 +893,7 @@ export class TodoStore {
     return { id, deleted: true }
   }
 
-  /** Move one todo out of its normal lifecycle list without changing its state. */
+  /** 将待办移出常规生命周期列表，不改变其状态。 */
   archive(id: string): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
@@ -934,7 +908,7 @@ export class TodoStore {
     return this.get(id)
   }
 
-  /** Restore one archived todo to the list for its current lifecycle state. */
+  /** 将归档待办恢复到其当前生命周期对应的列表。 */
   restore(id: string): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
@@ -949,7 +923,7 @@ export class TodoStore {
     return this.get(id)
   }
 
-  /** Return a bounded filtered page and unfiltered status counts. */
+  /** 返回有数量上限的筛选结果页，以及不受筛选影响的状态计数。 */
   list(input: ListTodoInput = {}): TodoListResult {
     this.assertOpen()
     const statuses = input.statuses === undefined
@@ -1049,7 +1023,7 @@ export class TodoStore {
     return counts
   }
 
-  /** Release the SQLite handle. Repeated calls are harmless. */
+  /** 释放 SQLite 连接；重复调用不会产生影响。 */
   close(): void {
     if (this.closed) return
     this.closed = true

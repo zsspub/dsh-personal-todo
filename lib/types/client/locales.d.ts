@@ -1,4 +1,4 @@
-/** Personal todo Web panel dictionaries. */
+/** 个人待办 Web 面板的多语言词典。 */
 export declare const zh: {
     'input.refine': string;
     'trigger.label': string;

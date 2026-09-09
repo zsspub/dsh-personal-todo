@@ -1,4 +1,4 @@
-/** JSON-safe contracts shared by the Host service, Agent tools, and Web client. */
+/** Host 服务、Agent 工具和 Web 客户端共用的 JSON 可序列化类型契约。 */
 
 export const TODO_STATUSES = [
   'pending', 'in_progress', 'blocked', 'in_review', 'completed', 'cancelled',
@@ -16,7 +16,7 @@ export type TodoPriority = (typeof TODO_PRIORITIES)[number]
 export type TodoRunStatus = (typeof TODO_RUN_STATUSES)[number]
 export type TodoEventType = (typeof TODO_EVENT_TYPES)[number]
 
-/** One durable personal todo. Timestamps use canonical RFC 3339 UTC strings. */
+/** 一条持久化个人待办；时间戳采用标准 RFC 3339 UTC 字符串。 */
 export interface Todo {
   readonly id: string
   readonly title: string
@@ -38,7 +38,7 @@ export interface Todo {
   readonly archivedAt: string | null
 }
 
-/** One Agent execution cycle for a todo. */
+/** 待办的一轮 Agent 执行周期。 */
 export interface TodoRun {
   readonly id: string
   readonly todoId: string
@@ -52,7 +52,7 @@ export interface TodoRun {
   readonly finishedAt: string | null
 }
 
-/** One durable Session associated with a todo. */
+/** 与待办关联的一条持久化会话记录。 */
 export interface TodoSession {
   readonly todoId: string
   readonly sessionId: string
@@ -61,7 +61,7 @@ export interface TodoSession {
   readonly createdAt: string
 }
 
-/** One immutable user-visible todo activity record. */
+/** 一条不可变、用户可见的待办活动记录。 */
 export interface TodoEvent {
   readonly id: string
   readonly todoId: string
@@ -71,7 +71,7 @@ export interface TodoEvent {
   readonly createdAt: string
 }
 
-/** Todo snapshot plus its execution, Session, and activity history. */
+/** 待办快照及其执行、会话和活动历史。 */
 export interface TodoDetail {
   readonly todo: Todo
   readonly runs: TodoRun[]
@@ -79,7 +79,7 @@ export interface TodoDetail {
   readonly events: TodoEvent[]
 }
 
-/** Fields accepted when creating a todo. New todos always begin pending. */
+/** 创建待办时接受的字段；新待办始终从待处理状态开始。 */
 export interface CreateTodoInput {
   readonly title: string
   readonly notes?: string | null
@@ -89,7 +89,7 @@ export interface CreateTodoInput {
   readonly tags?: readonly string[]
 }
 
-/** Editable todo fields. Lifecycle changes use dedicated commands. */
+/** 可编辑的待办字段；生命周期变更使用专用命令。 */
 export interface UpdateTodoPatch {
   readonly title?: string
   readonly notes?: string | null
@@ -99,48 +99,48 @@ export interface UpdateTodoPatch {
   readonly tags?: readonly string[]
 }
 
-/** Update one todo by opaque id. */
+/** 通过不透明标识符更新待办。 */
 export interface UpdateTodoRequest {
   readonly id: string
   readonly patch: UpdateTodoPatch
 }
 
-/** Address one todo by opaque id. */
+/** 通过不透明标识符定位待办。 */
 export interface TodoIdRequest {
   readonly id: string
 }
 
-/** Delete one todo by opaque id. */
+/** 通过不透明标识符删除待办。 */
 export type DeleteTodoRequest = TodoIdRequest
 
-/** User reply to an Agent-blocked todo. */
+/** 用户对 Agent 阻塞问题的回复。 */
 export interface ReplyTodoRequest extends TodoIdRequest {
   readonly message: string
 }
 
-/** User feedback that starts another execution cycle. */
+/** 触发新一轮执行的用户修改意见。 */
 export interface RequestTodoChangesRequest extends TodoIdRequest {
   readonly feedback: string
 }
 
-/** Agent-authored progress update. */
+/** Agent 汇报的进度更新。 */
 export interface ReportTodoProgressRequest extends TodoIdRequest {
   readonly message: string
 }
 
-/** Agent-authored blocking question. */
+/** Agent 提出的阻塞问题。 */
 export interface BlockTodoRequest extends TodoIdRequest {
   readonly question: string
 }
 
-/** Agent-authored review submission. */
+/** Agent 提交的审核结果。 */
 export interface SubmitTodoReviewRequest extends TodoIdRequest {
   readonly summary: string
   readonly verification?: string | null
   readonly risk?: string | null
 }
 
-/** Filters and pagination for a todo listing. Every supplied tag must match. */
+/** 待办列表的筛选和分页条件；必须匹配所有指定标签。 */
 export interface ListTodoInput {
   readonly statuses?: readonly TodoStatus[]
   readonly priorities?: readonly TodoPriority[]
@@ -149,11 +149,11 @@ export interface ListTodoInput {
   readonly search?: string
   readonly limit?: number
   readonly offset?: number
-  /** When true, return archived todos; otherwise exclude them. */
+  /** 为 true 时返回归档待办，否则排除归档待办。 */
   readonly archived?: boolean
 }
 
-/** Counts across the complete database, independent of list filters. */
+/** 整个数据库的状态计数，不受列表筛选条件影响。 */
 export interface TodoCounts {
   readonly pending: number
   readonly inProgress: number
@@ -164,7 +164,7 @@ export interface TodoCounts {
   readonly archived: number
 }
 
-/** One bounded page plus global lifecycle counts. */
+/** 一页有数量上限的待办，以及全局生命周期计数。 */
 export interface TodoListResult {
   readonly todos: Todo[]
   readonly total: number
@@ -172,7 +172,7 @@ export interface TodoListResult {
   readonly hasMore: boolean
 }
 
-/** Successful hard-delete result. */
+/** 永久删除成功的结果。 */
 export interface DeleteTodoResult {
   readonly id: string
   readonly deleted: true

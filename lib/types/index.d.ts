@@ -1,4 +1,4 @@
-/** Host service exposing one SQLite personal-todo database to tools and Web Remote calls. */
+/** 向工具和 Web Remote 调用提供统一 SQLite 个人待办数据库的 Host 服务。 */
 import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
@@ -23,55 +23,51 @@ declare module '@deepseek-ai/cordis' {
         }): void;
     }
 }
-/** Deployment configuration for the personal todo database and list bounds. */
+/** 个人待办数据库及列表数量限制的部署配置。 */
 export interface Config {
     readonly databasePath: string;
     readonly journalMode?: JournalMode;
     readonly busyTimeoutMs?: number;
     readonly defaultListLimit?: number;
     readonly maxListLimit?: number;
-    /** Optional Agent preset used by todo-created root Sessions. */
+    /** 创建待办根会话时使用的可选 Agent 预设。 */
     readonly agentPreset?: string;
 }
-/** Authoritative todo service shared by generated Remote methods and Agent tools. */
+/** 生成的 Remote 方法与 Agent 工具共用的权威待办服务。 */
 export declare class PersonalTodoService extends TypertRemoteService {
     static inject: string[];
     static Config: z<Config>;
     private readonly store;
     private readonly orchestrator;
-    /** @param ctx - Host context publishing the `personalTodo` Remote namespace. @param config - validated database policy. */
+    /** @param ctx - 发布 personalTodo Remote 命名空间的 Host 上下文。 @param config - 已校验的数据库配置。 */
     constructor(ctx: Context, config: Config);
-    /** List one bounded page. Cancellation is checked before synchronous SQLite work begins. */
+    /** 查询一页待办；在开始同步 SQLite 操作前检查取消信号。 */
     list(request: ListTodoInput, signal: AbortSignal): Promise<TodoListResult>;
-    /** Create one durable todo. */
+    /** 创建并持久化一条待办。 */
     create(request: CreateTodoInput, signal: AbortSignal): Promise<Todo>;
-    /** Read one todo with its runs, Sessions, and activity timeline. */
+    /** 读取待办及其执行轮次、关联会话和活动记录。 */
     get(request: TodoIdRequest, signal: AbortSignal): Promise<TodoDetail>;
-    /** Update one durable todo. */
+    /** 更新已持久化的待办。 */
     update(request: UpdateTodoRequest, signal: AbortSignal): Promise<Todo>;
-    /** Start one pending todo in its durable root Session. */
+    /** 在待办的持久化根会话中启动一条待处理任务。 */
     start(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
-    /** Resume a blocked todo with the user's answer. */
+    /** 使用用户回复继续执行被阻塞的待办。 */
     reply(request: ReplyTodoRequest, signal: AbortSignal): Promise<Todo>;
-    /** Accept the latest Agent submission as complete. */
+    /** 批准 Agent 最近一次提交，并将待办标记为完成。 */
     approve(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
-    /** Move one todo to the archive without changing its lifecycle state. */
+    /** 归档待办，不改变其生命周期状态。 */
     archive(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
-    /** Restore one archived todo to its lifecycle list. */
+    /** 将归档待办恢复到对应生命周期列表。 */
     restore(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
-    /** Return the reviewed todo to its root Session with user feedback. */
+    /** 将用户修改意见发回待办的根会话。 */
     requestChanges(request: RequestTodoChangesRequest, signal: AbortSignal): Promise<Todo>;
-    /** Return exact source fields for delegation by the active primary Agent Session. */
-    delegationSource(id: string, sessionId: string): Todo;
-    /** Return the active todo linked to one Session, when present. */
-    activeTodoForSession(sessionId: string): Todo | undefined;
-    /** Record one progress milestone from the todo's primary Agent Session. */
+    /** 记录待办主 Agent 会话汇报的进度节点。 */
     reportProgress(request: ReportTodoProgressRequest, sessionId: string): Promise<Todo>;
-    /** Pause one todo on a question from its primary Agent Session. */
+    /** 根据主 Agent 会话提出的问题暂停待办。 */
     block(request: BlockTodoRequest, sessionId: string): Promise<Todo>;
-    /** Submit one primary Agent Session's result for user review. */
+    /** 提交主 Agent 会话的执行结果，等待用户审核。 */
     submitReview(request: SubmitTodoReviewRequest, sessionId: string): Promise<Todo>;
-    /** Permanently delete one todo. */
+    /** 永久删除一条待办。 */
     delete(request: DeleteTodoRequest, signal: AbortSignal): Promise<DeleteTodoResult>;
 }
 export default PersonalTodoService;

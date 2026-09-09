@@ -56,7 +56,6 @@ The bundle patch mounts the Host service and tools. Its Web manifest loads the c
 | `personal_todo_list` | Filter and page todos; returns matching rows, total, global status counts, and `hasMore`. |
 | `personal_todo_update` | Replace any supplied mutable fields; `null` clears notes, assignee, or due time and `[]` clears tags. |
 | `personal_todo_progress` | Record a meaningful milestone from the todo's primary Agent Session. |
-| `personal_todo_delegate_codex` | When the optional Codex delegate service is present, dispatch the stored title and notes with no model-authored prompt; only `id` and `cwd` are accepted. |
 | `personal_todo_block` | Pause execution and surface one question in the task center. |
 | `personal_todo_submit_review` | Submit a summary, verification, and remaining risk for user review. |
 | `personal_todo_delete` | Permanently delete one todo by UUID. |
@@ -65,7 +64,7 @@ Lists show every active workflow state and exclude archived records by default. 
 
 ## Task flow
 
-In the Web task center, Create saves a pending todo; Create and start also starts execution immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. A todo that explicitly assigns the work to Codex uses `personal_todo_delegate_codex`: the Host serializes the stored title and notes, while a monotonic Tool guard denies direct `codex_task` calls from the active primary Session and every linked descendant. Other tasks may use a delegate or equivalent subagent for independent workstreams; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. The sidebar count surfaces blocked and review-ready work without opening the task center. After a DSH process restart, the plugin resumes durable `in_progress` runs whose Agent is not already running. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
+In the Web task center, Create saves a pending todo; Create and start also starts execution immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. The Agent chooses the execution approach and tools, and may work directly or delegate as appropriate; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. The sidebar count surfaces blocked and review-ready work without opening the task center. After a DSH process restart, the plugin resumes durable `in_progress` runs whose Agent is not already running. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
 
 ## Configuration
 

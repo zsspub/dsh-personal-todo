@@ -56,7 +56,6 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 | `personal_todo_list` | 筛选和分页查询待办，返回匹配记录、总数、全局状态计数和 `hasMore`。 |
 | `personal_todo_update` | 替换任意已提供的可变字段；`null` 清空备注、负责人或截止时间，`[]` 清空标签。 |
 | `personal_todo_progress` | 由待办主 Agent Session 记录一项有意义的进度。 |
-| `personal_todo_delegate_codex` | 可选 Codex 委派服务存在时，用数据库中的标题和备注派发任务，不接受模型编写的 Prompt；调用方只能提供 `id` 和 `cwd`。 |
 | `personal_todo_block` | 暂停执行，并在任务中心显示一个待回答问题。 |
 | `personal_todo_submit_review` | 提交完成摘要、验证结果和遗留风险供用户审核。 |
 | `personal_todo_delete` | 按 UUID 永久删除一条待办。 |
@@ -65,7 +64,7 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 
 ## 任务流程
 
-在 Web 任务中心选择“创建”会保存为待处理，选择“创建并开始”会立即启动执行。启动任意待处理待办会创建或接管一个确定的普通 Session，并把任务说明发送给 Agent。明确要求 Codex 执行的待办使用 `personal_todo_delegate_codex`：Host 序列化数据库中的标题和备注，单调 Tool guard 会拒绝活动主 Session 及所有关联后代直接调用 `codex_task`。其他任务可以使用 delegate 或等价 subagent 工具拆分独立工作；DSH 发布子 Session 时，插件会把该子会话及其嵌套后代关联到待办。Agent 可以记录进度，在缺少输入时提交明确问题，并把结果流转到 `in_review`。侧栏计数会直接提示等待回复和待审核工作，无需先打开任务中心。DSH 进程重启后，插件会恢复 Agent 尚未运行的持久化 `in_progress` Run。审核通过后进入 `completed`；提出修改意见会在同一个主会话中创建新的 Run，并返回 `in_progress`。
+在 Web 任务中心选择“创建”会保存为待处理，选择“创建并开始”会立即启动执行。启动任意待处理待办会创建或接管一个确定的普通 Session，并把任务说明发送给 Agent。Agent 根据用户需求和可用能力，自主决定执行方式、工具及是否委派；DSH 发布子 Session 时，插件会把该子会话及其嵌套后代关联到待办。Agent 可以记录进度，在缺少输入时提交明确问题，并把结果流转到 `in_review`。侧栏计数会直接提示等待回复和待审核工作，无需先打开任务中心。DSH 进程重启后，插件会恢复 Agent 尚未运行的持久化 `in_progress` Run。审核通过后进入 `completed`；提出修改意见会在同一个主会话中创建新的 Run，并返回 `in_progress`。
 
 ## 配置
 

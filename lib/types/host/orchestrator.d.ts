@@ -1,4 +1,4 @@
-/** Todo-to-Session orchestration over the Host's ordinary Session service. */
+/** 基于 Host 普通会话服务编排待办的启动与恢复。 */
 import type { ReplyTodoRequest, RequestTodoChangesRequest, Todo } from '../types.ts';
 import { TodoStore } from './store.ts';
 interface TodoAgent {
@@ -16,7 +16,7 @@ interface TodoAgent {
         };
     }): void;
 }
-/** Minimum Host Session API consumed by the standalone plugin. */
+/** 独立插件所需的最小 Host 会话接口。 */
 export interface TodoSessionController {
     create(request: {
         readonly sessionId: string;
@@ -35,20 +35,20 @@ export interface TodoSessionController {
 interface TodoOrchestratorConfig {
     readonly agentPreset?: string;
 }
-/** Starts and resumes the one ordinary root Session owned by each todo. */
+/** 启动和恢复每条待办所属的唯一普通根会话。 */
 export declare class TodoOrchestrator {
     private readonly store;
     private readonly sessions;
     private readonly config;
     constructor(store: TodoStore, sessions: TodoSessionController, config: TodoOrchestratorConfig);
     private deliver;
-    /** Resume durable in-progress runs whose Agents are not already active. */
+    /** 恢复已持久化且 Agent 尚未运行的执行中待办。 */
     recover(signal: AbortSignal): Promise<void>;
-    /** Create or resume a root Session and dispatch one pending todo. */
+    /** 创建或复用根会话，并派发一条待处理待办。 */
     start(id: string): Promise<Todo>;
-    /** Deliver a user's answer to the blocked root Session. */
+    /** 将用户回复发送到被阻塞待办的根会话。 */
     reply(request: ReplyTodoRequest): Promise<Todo>;
-    /** Start a new run in the same root Session with the user's review feedback. */
+    /** 携带用户审核意见，在同一根会话中开始新一轮执行。 */
     requestChanges(request: RequestTodoChangesRequest): Promise<Todo>;
 }
 export {};

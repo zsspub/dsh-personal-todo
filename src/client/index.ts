@@ -1,4 +1,4 @@
-/** Browser plugin adding a localized personal-todo manager to the sidebar footer. */
+/** 在侧栏底部添加支持多语言的个人待办管理入口。 */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
@@ -23,11 +23,11 @@ export type { PersonalTodoKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** Personal todo panel controls and status copy. */
+    /** 个人待办面板的控件和状态文案。 */
     personalTodo: PersonalTodoKey
   }
   interface SlotMap {
-    /** Root-scoped layer hosting the floating personal todo drawer. */
+    /** 承载个人待办悬浮抽屉的根级图层。 */
     'shell.overlay': { kind: 'list'; scope: 'root' }
   }
 }
@@ -38,7 +38,7 @@ function remoteFailure(result: { readonly error: { readonly message: string; rea
   return new Error(`${result.error.message} (${result.error.code})`)
 }
 
-/** Mount the generated Remote namespace and register the sidebar trigger plus todo Canvas. */
+/** 挂载生成的 Remote 命名空间，并注册侧栏入口和待办面板。 */
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'personal-todo: dictionaries')
   const disposeRemote = await ctx.remote.$mount(personalTodoRemote)

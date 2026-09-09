@@ -1,4 +1,4 @@
-/** Personal todo Web panel dictionaries. */
+/** 个人待办 Web 面板的多语言词典。 */
 
 export const zh = {
   'input.refine': '显示前 50 项，输入关键词筛选',

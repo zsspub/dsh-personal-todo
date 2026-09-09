@@ -1,4 +1,4 @@
-/** Todo-to-Session orchestration over the Host's ordinary Session service. */
+/** 基于 Host 普通会话服务编排待办的启动与恢复。 */
 
 import { randomUUID } from 'node:crypto'
 import type {
@@ -17,7 +17,7 @@ interface TodoAgent {
   }): void
 }
 
-/** Minimum Host Session API consumed by the standalone plugin. */
+/** 独立插件所需的最小 Host 会话接口。 */
 export interface TodoSessionController {
   create(request: {
     readonly sessionId: string
@@ -61,7 +61,7 @@ function recoveryPrompt(todoId: string): string {
   return `Resume personal todo ${todoId} after the DSH service restart. Inspect the existing conversation before acting, continue only unfinished work, and submit the result for review when ready.`
 }
 
-/** Starts and resumes the one ordinary root Session owned by each todo. */
+/** 启动和恢复每条待办所属的唯一普通根会话。 */
 export class TodoOrchestrator {
   constructor(
     private readonly store: TodoStore,
@@ -80,7 +80,7 @@ export class TodoOrchestrator {
     })
   }
 
-  /** Resume durable in-progress runs whose Agents are not already active. */
+  /** 恢复已持久化且 Agent 尚未运行的执行中待办。 */
   async recover(signal: AbortSignal): Promise<void> {
     for (const todo of this.store.recoverableTodos()) {
       signal.throwIfAborted()
@@ -104,7 +104,7 @@ export class TodoOrchestrator {
     }
   }
 
-  /** Create or resume a root Session and dispatch one pending todo. */
+  /** 创建或复用根会话，并派发一条待处理待办。 */
   async start(id: string): Promise<Todo> {
     const before = this.store.get(id)
     const runId = randomUUID()
@@ -123,7 +123,7 @@ export class TodoOrchestrator {
     }
   }
 
-  /** Deliver a user's answer to the blocked root Session. */
+  /** 将用户回复发送到被阻塞待办的根会话。 */
   async reply(request: ReplyTodoRequest): Promise<Todo> {
     const todo = this.store.reply(request)
     const sessionId = todo.primarySessionId
@@ -138,7 +138,7 @@ export class TodoOrchestrator {
     }
   }
 
-  /** Start a new run in the same root Session with the user's review feedback. */
+  /** 携带用户审核意见，在同一根会话中开始新一轮执行。 */
   async requestChanges(request: RequestTodoChangesRequest): Promise<Todo> {
     const runId = randomUUID()
     const todo = this.store.requestChanges(request, runId)

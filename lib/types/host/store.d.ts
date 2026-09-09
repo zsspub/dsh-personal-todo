@@ -1,4 +1,4 @@
-/** SQLite owner for personal todo validation, ordering, and durable writes. */
+/** 负责个人待办校验、排序和持久化写入的 SQLite 存储层。 */
 import type { BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoListResult, TodoSession, UpdateTodoPatch } from '../types.ts';
 export declare const PERSONAL_TODO_SCHEMA_VERSION = 5;
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist';
@@ -14,11 +14,11 @@ interface TodoStoreDependencies {
     readonly createId?: () => string;
     readonly createEventId?: () => string;
 }
-/** Stable domain failure surfaced through tools and Remote calls. */
+/** 通过工具与 Remote 调用返回的统一业务错误。 */
 export declare class PersonalTodoError extends Error {
     constructor(message: string);
 }
-/** Synchronous SQLite repository. Each public mutation is one database transaction. */
+/** 同步 SQLite 存储库；每个公开写入操作均在一个数据库事务中完成。 */
 export declare class TodoStore {
     private readonly config;
     private readonly database;
@@ -45,49 +45,45 @@ export declare class TodoStore {
     private requireStatus;
     private requireOwnedRun;
     private appendEvent;
-    /** Return one todo snapshot or fail for an unknown id. */
+    /** 返回待办快照；标识符不存在时抛出错误。 */
     get(id: string): Todo;
-    /** Return the active todo owned by one Session in its linked conversation tree. */
-    activeTodoForSession(sessionId: string): Todo | undefined;
-    /** Return exact source fields for delegation by the active primary Session. */
-    delegationSource(id: string, sessionId: string): Todo;
-    /** Return one todo with its durable execution history. */
+    /** 返回待办及其持久化执行历史。 */
     detail(id: string): TodoDetail;
-    /** Create and durably return one normalized pending todo. */
+    /** 规范化并持久化一条待处理待办，返回保存结果。 */
     create(input: CreateTodoInput): Todo;
-    /** Replace supplied editable fields and return the durable todo. */
+    /** 替换指定的可编辑字段，返回持久化后的待办。 */
     update(id: string, patch: UpdateTodoPatch): Todo;
-    /** Claim a pending todo and create its first Agent execution cycle. */
+    /** 认领一条待处理待办，并创建其首轮 Agent 执行周期。 */
     beginRun(id: string, runId: string, sessionId: string): Todo;
-    /** Attach one child Session when its direct parent already belongs to a todo. */
+    /** 直接父会话已关联待办时，将子会话关联到同一待办。 */
     linkRelatedSession(parentSessionId: string, sessionId: string): TodoSession | undefined;
-    /** Return running todos whose existing root Sessions need process-start recovery. */
+    /** 返回服务启动后需要在原根会话中恢复的执行中待办。 */
     recoverableTodos(): Todo[];
-    /** Return a failed initial dispatch to pending while retaining its audit record. */
+    /** 将初始派发失败的待办恢复为待处理，并保留审计记录。 */
     failRun(id: string, runId: string, message: string): Todo;
-    /** Record progress from the todo's primary Agent Session. */
+    /** 记录待办主 Agent 会话汇报的进度。 */
     progress(id: string, sessionId: string, message: string): Todo;
-    /** Pause an in-progress todo on an Agent-authored user question. */
+    /** 根据 Agent 提出的用户问题暂停执行中的待办。 */
     block(request: BlockTodoRequest, sessionId: string): Todo;
-    /** Resume a blocked todo after the user supplies an answer. */
+    /** 用户回复后恢复被阻塞的待办。 */
     reply(request: ReplyTodoRequest): Todo;
-    /** Submit Agent results for explicit user review. */
+    /** 提交 Agent 结果，等待用户明确审核。 */
     submitReview(request: SubmitTodoReviewRequest, sessionId: string): Todo;
-    /** Accept the latest Agent submission as complete. */
+    /** 批准 Agent 最近一次提交，并将待办标记为完成。 */
     approve(id: string): Todo;
-    /** Return a reviewed todo to its primary Session in a new execution cycle. */
+    /** 在原主会话中创建新一轮执行，处理用户修改意见。 */
     requestChanges(request: RequestTodoChangesRequest, runId: string): Todo;
-    /** Permanently delete one todo and its related records. */
+    /** 永久删除待办及其关联记录。 */
     delete(id: string): DeleteTodoResult;
-    /** Move one todo out of its normal lifecycle list without changing its state. */
+    /** 将待办移出常规生命周期列表，不改变其状态。 */
     archive(id: string): Todo;
-    /** Restore one archived todo to the list for its current lifecycle state. */
+    /** 将归档待办恢复到其当前生命周期对应的列表。 */
     restore(id: string): Todo;
-    /** Return a bounded filtered page and unfiltered status counts. */
+    /** 返回有数量上限的筛选结果页，以及不受筛选影响的状态计数。 */
     list(input?: ListTodoInput): TodoListResult;
     private normalizeEnumFilter;
     private counts;
-    /** Release the SQLite handle. Repeated calls are harmless. */
+    /** 释放 SQLite 连接；重复调用不会产生影响。 */
     close(): void;
 }
 export {};

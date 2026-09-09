@@ -1,33 +1,33 @@
 ---
 name: personal-todo-execution
-description: Standard operating procedure for autonomously executing a DSH personal todo — how to delegate to Codex, run independent workstreams, report progress, block on user input, and submit for review. Load this at the start of any personal todo run started from the personal-todo panel or the personal_todo tools.
+description: 自主执行 DSH 个人待办的标准流程：选择执行方式、汇报进度、请求用户输入并提交审核。从个人待办面板或 personal_todo 工具启动执行时，应先加载本 skill。
 disable-model-invocation: false
 user-invocable: false
 ---
 
-# Executing a personal todo
+# 执行个人待办
 
-You are running one durable personal todo to completion in its own root Session. The first user message of the run gives you the todo identity (`id`, `Title`, `Notes`, `Assignee`) and the binding guardrails. This skill is the full procedure those guardrails point to. Follow it for the whole run.
+你正在专属根会话中执行一条持久化个人待办。本轮执行的首条用户消息包含待办标识和任务信息（`id`、`Title`、`Notes`、`Assignee`），以及必须遵守的约束。本 skill 是这些约束对应的完整流程，整个执行过程都应遵守。
 
-## Authority and lifecycle
+## 权限与生命周期
 
-- Work autonomously within the current DSH permissions and execution context. Do not ask the user for confirmation you can obtain by inspecting the workspace, the repository, or the todo record.
-- **Never mark the todo completed yourself.** Only the user may approve it. Your terminal action for a finished task is `personal_todo_submit_review`, not completion.
-- Treat the `id` from the first message as the todo id for every `personal_todo_*` call in this run.
+- 在当前 DSH 权限和执行上下文范围内自主推进。对于通过检查工作区、仓库或待办记录就能确认的信息，不要反复询问用户。
+- **不要自行将待办标记为已完成。只有用户可以审核通过。** 任务完成后的最终操作是调用 `personal_todo_submit_review` 提交审核。
+- 本轮所有 `personal_todo_*` 调用都使用首条消息提供的待办 `id`。
 
-## Choosing how to do the work
+## 自主选择执行方式
 
-1. **When the todo explicitly asks Codex to perform the work** (for example "把任务派给 codex 做" / "delegate to Codex"): resolve only the required working directory (`cwd`), then call `personal_todo_delegate_codex` with that todo `id` and `cwd`. Do this **before** inspecting the target repository or decomposing the task. That tool forwards the stored title and notes verbatim; you do not author a Codex prompt. **Do not call `codex_task` directly** for such a todo — the primary Session is denied direct Codex use by design.
-2. **For other tasks**, use a delegate or an equivalent subagent for independent workstreams that benefit from a separate but related conversation. Delegated conversations are linked to this todo automatically, so prefer them for focused, self-contained pieces of work.
-3. For small, single-context work, just do it directly in this Session.
+- 根据用户需求、可用能力、权限和任务上下文，自主决定由谁执行、如何执行。插件不指定执行服务或工具。
+- 可以直接完成任务、使用现有工具，或在有帮助时委派独立工作；是否拆分任务、如何拆分均由你决定。
+- DSH 子会话会自动关联到待办。主会话负责收集结果、汇报进度，并提交最终结果供用户审核。
 
-## Reporting, blocking, and review
+## 进度、阻塞与审核
 
-- Call `personal_todo_progress` with the todo `id` at meaningful milestones — a resolved plan, a delegated task accepted, a verification passed. Keep each message concise and factual; do not narrate every step.
-- If you genuinely need user input to proceed, call `personal_todo_block` with the todo `id` and the exact question. Do not guess past a real decision point.
-- When the requested outcome is ready, call `personal_todo_submit_review` with the todo `id`, a concise `summary` of what was produced, the `verification` you performed and its result, and any remaining `risk`.
+- 在明确方案、委派任务被接受、验证通过等有意义的节点，使用待办 `id` 调用 `personal_todo_progress`。内容应简洁、准确，无需逐步播报所有操作。
+- 确实需要用户输入才能继续时，使用待办 `id` 和明确问题调用 `personal_todo_block`。不要通过猜测绕过必须由用户决定的事项。
+- 请求的结果准备就绪后，调用 `personal_todo_submit_review`，提供待办 `id`、简明的完成摘要 `summary`、已执行的验证及其结果 `verification`，以及剩余风险 `risk`。
 
-## Delegated and blocked runs
+## 委派与恢复执行
 
-- After a Codex or subagent delegation is accepted, keep working on independent steps; collect the delegated result only when you need it, then verify it before reporting progress or submitting review.
-- When the run resumes from a user reply to a blocked todo, or from a service restart, inspect the existing conversation first, continue only the unfinished work, and submit the result for review when ready.
+- 如果委派了工作，可以继续推进其他独立事项；需要结果时再收集，并在汇报进度或提交审核前验证委派结果。
+- 收到用户回复、审核修改意见，或服务重启后恢复执行时，应先查看已有对话，只继续未完成的工作，结果准备就绪后再提交审核。

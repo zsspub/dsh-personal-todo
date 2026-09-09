@@ -15,8 +15,8 @@ import { TODO_STATUSES } from '../types.ts'
 import type { PersonalTodoCanvasController } from './canvas.ts'
 import type { NS } from './locales.ts'
 
-// The slot renderer anchors list slots with inline `display: contents`. A wide
-// sidebar reifies that wrapper so every footer action occupies its own row.
+// 插槽渲染器为列表插槽设置内联 display: contents。
+// 宽侧栏下将包裹层恢复为布局容器，使每个底部操作独占一行。
 const CSS = `
 .dsh-personal-todo-trigger{position:relative;min-width:28px}
 .dsh-personal-todo-attention{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;margin-left:auto;padding:0 5px;border-radius:9px;background:var(--dsw-alias-label-error);color:var(--dsw-alias-bg-layer-1);font-size:11px;line-height:18px}
@@ -192,7 +192,7 @@ function normalizedAssignee(value: string): string | null {
   return assignee === '' ? null : assignee
 }
 
-/** Sidebar action opening the task Canvas and surfacing attention work. */
+/** 打开待办面板并提示待处理事项的侧栏入口。 */
 export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, closeCanvas }: PersonalTodoTriggerProps) {
   const snapshot = useSyncExternalStore(canvas.subscribe, canvas.getSnapshot)
 
@@ -241,7 +241,7 @@ export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, closeCa
   )
 }
 
-/** Task-driven personal todo drawer floating in the shell overlay. */
+/** 悬浮在 shell.overlay 图层中的个人待办抽屉。 */
 export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const {
     t, canvas, list, get, create, update, start, reply, approve, archive, restore,
@@ -354,7 +354,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
       return
     }
     const onOutsidePointerDown = (event: PointerEvent): void => {
-      // React capture also covers this drawer's portalled menus and dialogs.
+      // React 捕获阶段也会覆盖通过 Portal 渲染的抽屉菜单和对话框。
       if (insidePointer.current === event) return
       if (event.target instanceof Element && event.target.closest('.dsh-personal-todo-trigger') !== null) return
       close()
