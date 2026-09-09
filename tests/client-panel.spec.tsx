@@ -12,8 +12,10 @@ import type {
   CreateTodoInput, ListTodoInput, Todo, TodoCounts, TodoDetail, TodoListResult, TodoSession, UpdateTodoRequest,
 } from '../src/types.ts'
 
-vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => {
+vi.mock('@deepseek-ai/dsh-client-ui-primitives', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@deepseek-ai/dsh-client-ui-primitives')>()
   return {
+    MarkdownText: original.MarkdownText,
     Button: ({ icon, children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon?: React.ReactNode }) => <button {...props}>{icon}{children}</button>,
     Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
     Menu: ({ open, anchor, items, selectedId, onSelect }: {
@@ -238,6 +240,33 @@ afterEach(() => {
 })
 
 describe('PersonalTodoCanvas', () => {
+  it('将摘要、验证、风险、备注和活动渲染为安全的 Markdown', async () => {
+    const user = userEvent.setup()
+    const source = todo({
+      status: 'in_review', primarySessionId: 'session-1', activeRunId: 'run-1',
+      latestSummary: '**摘要加粗**', notes: '## 备注标题\n\n[文档](https://example.com/docs)',
+    })
+    const service = api([source])
+    const snapshot = detail(source)
+    vi.mocked(service.get).mockResolvedValue({
+      ...snapshot,
+      runs: snapshot.runs.map(run => ({ ...run, verification: '1. 验证一\n2. 验证二', risk: '`风险代码`' })),
+      events: [{ ...snapshot.events[0]!, message: '> 活动引用\n\n<script>alert(1)</script>\n\n[危险](javascript:alert(1))' }],
+    })
+    render(<TodoSurface service={service} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    await user.click(await screen.findByRole('tab', { name: 'In review 1' }))
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    expect((await screen.findByText('摘要加粗')).tagName).toBe('STRONG')
+    expect(screen.getByRole('heading', { name: '备注标题' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: '文档' }).getAttribute('href')).toBe('https://example.com/docs')
+    expect(screen.getByText('验证一').closest('ol')).not.toBeNull()
+    expect(screen.getByText('风险代码').tagName).toBe('CODE')
+    expect(screen.getByText('活动引用').closest('blockquote')).not.toBeNull()
+    expect(document.querySelector('.dsh-personal-todo-markdown script')).toBeNull()
+    expect(document.querySelector('a[href^="javascript:"]')).toBeNull()
+  })
+
   it.each(['pending', 'in_progress', 'blocked', 'in_review', 'completed', 'cancelled', 'archived'] as const)('复制 %s 待办时只保留元信息并打开新的待处理待办', async (state) => {
     const user = userEvent.setup()
     const source = todo({

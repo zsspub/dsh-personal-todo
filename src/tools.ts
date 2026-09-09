@@ -137,7 +137,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'personal_todo_progress',
-    description: 'Record a concise, meaningful progress milestone for a personal todo owned by the current Agent Session.',
+    description: '记录当前 Agent 会话所属待办的关键进展，并在对话正文中向用户简洁汇报；活动记录不能代替正文。',
     parameters: {
       id: { type: 'string', required: true, description: 'Todo id supplied in the task prompt.' },
       message: { type: 'string', required: true, description: 'Concise milestone or current work phase.' },
@@ -152,7 +152,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'personal_todo_block',
-    description: 'Pause the current personal todo and surface one exact question to the user.',
+    description: '暂停当前待办并记录需要用户回答的明确问题。成功后在对话正文中提出同一问题并结束本轮，等待用户输入。',
     parameters: {
       id: { type: 'string', required: true, description: 'Todo id supplied in the task prompt.' },
       question: { type: 'string', required: true, description: 'The exact question the user must answer.' },
@@ -163,7 +163,6 @@ export function apply(ctx: Context): void {
     },
     execute: async (args, exec) => {
       const todo = await ctx.personalTodo.block(args, primarySessionId(exec))
-      exec.concludeTurn()
       return todo
     },
     presentCall: args => ({ card: 'generic', title: `Block todo for input: ${args.id}`, kind: 'other', rawInput: args }),
@@ -171,7 +170,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'personal_todo_submit_review',
-    description: 'Submit the current personal todo for user review. This never marks the todo completed.',
+    description: '提交当前待办供用户审核，不会标记为已完成。成功后必须输出最终正文，说明结果、验证和遗留风险，再结束本轮等待用户审核。',
     parameters: {
       id: { type: 'string', required: true, description: 'Todo id supplied in the task prompt.' },
       summary: { type: 'string', required: true, description: 'Concise description of the completed outcome.' },
@@ -184,7 +183,6 @@ export function apply(ctx: Context): void {
     },
     execute: async (args, exec) => {
       const todo = await ctx.personalTodo.submitReview(args, primarySessionId(exec))
-      exec.concludeTurn()
       return todo
     },
     presentCall: args => ({ card: 'generic', title: `Submit todo for review: ${args.id}`, kind: 'other', rawInput: args }),

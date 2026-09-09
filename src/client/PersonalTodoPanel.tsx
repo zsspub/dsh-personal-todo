@@ -1,9 +1,9 @@
 import React, {
-  useCallback, useEffect, useRef, useState, useSyncExternalStore,
+  useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore,
 } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  Button, Menu, Modal,
+  Button, MarkdownText, Menu, Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { Archive, ArrowDown, ArrowLeft, CalendarDays, ChevronRight, ChevronsUp, CircleCheck, CircleDashed, CircleDot, CircleX, ClipboardCheck, ClipboardList, Copy, Ellipsis, Equal, Flag, GitBranch, ListTodo, LoaderCircle, MessageCircle, MessageSquare, Pencil, Play, Plus, Tag, Trash2, Undo2, UserRound, X } from 'lucide-react'
 import type {
@@ -67,6 +67,7 @@ const CSS = `
 .dsh-personal-todo-callout{margin-top:14px;padding:12px;border-radius:12px;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2)}
 .dsh-personal-todo-review{margin-top:24px;padding-top:20px;border-top:1px solid var(--dsw-alias-border-l2)}.dsh-personal-todo-detail .dsh-personal-todo-review h3{display:flex;align-items:center;gap:8px;margin:0 0 16px;font-size:14px;line-height:22px;font-weight:600}
 .dsh-personal-todo-review dl{display:flex;flex-direction:column;gap:20px;margin:0;font-size:13px;line-height:22px}.dsh-personal-todo-review dt{display:flex;align-items:center;gap:6px;margin-bottom:6px;color:var(--dsw-alias-label-secondary);font-size:12px;font-weight:500}.dsh-personal-todo-review dd{margin:0;color:var(--dsw-alias-label-primary);white-space:pre-wrap;overflow-wrap:anywhere}.dsh-personal-todo-review svg{flex:none}
+.dsh-personal-todo-markdown{min-width:0;max-width:100%;overflow-x:auto;white-space:normal;overflow-wrap:anywhere}.dsh-personal-todo-markdown pre{max-width:100%;overflow-x:auto}.dsh-personal-todo-detail .dsh-personal-todo-markdown p{margin:0 0 8px}.dsh-personal-todo-markdown>:last-child{margin-bottom:0}
 .dsh-personal-todo-review-actions{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2)}.dsh-personal-todo-review-action-heading{display:flex;flex-direction:column;gap:4px;font-size:12px;line-height:18px}.dsh-personal-todo-review-action-heading strong{color:var(--dsw-alias-label-primary);font-weight:600}.dsh-personal-todo-review-action-heading span{color:var(--dsw-alias-label-secondary)}.dsh-personal-todo-review-actions.dsh-personal-todo-commandbar{padding:14px 4px 0;max-height:45%;overflow:auto}.dsh-personal-todo-review-actions.dsh-personal-todo-commandbar textarea{flex:none;min-height:64px;height:64px;max-height:120px;background:var(--dsw-alias-bg-layer-1)}.dsh-personal-todo-review-actions textarea::placeholder{color:var(--dsw-alias-label-tertiary);opacity:1}.dsh-personal-todo-review-actions textarea:focus-visible{outline:2px solid var(--dsw-alias-brand-primary-new-colorprimary-new-color);outline-offset:1px}.dsh-personal-todo-review-actions .dsh-personal-todo-commandbar-actions{flex-wrap:wrap}
 .dsh-personal-todo-commandbar{display:flex;align-items:stretch;flex-direction:column;gap:10px;flex:none;padding:10px 20px 12px}.dsh-personal-todo-commandbar textarea{min-width:0;min-height:72px;flex:1}.dsh-personal-todo-commandbar-actions{display:flex;justify-content:flex-end;gap:8px;flex:none}
 .dsh-personal-todo-timeline{display:flex;flex-direction:column;gap:16px;margin-top:8px}.dsh-personal-todo-event{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;font-size:12px;color:var(--dsw-alias-label-secondary)}.dsh-personal-todo-event time{color:var(--dsw-alias-label-tertiary)}
@@ -247,6 +248,12 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     t, canvas, list, get, create, update, start, reply, approve, archive, restore,
     requestChanges, delete: deleteTodo, openSession, closeCanvas,
   } = props
+  // 同时兼容已发布版的 codeLabels 与新版 Host 的 labels 接口。
+  const markdownProps = useMemo(() => {
+    const code = { copyLabel: t('markdown.copy'), copiedLabel: t('markdown.copied') }
+    return { codeLabels: code, labels: { code, footnotes: t('markdown.footnotes') } }
+  }, [t])
+  const markdown = (text: string): React.ReactNode => <div className="dsh-personal-todo-markdown"><MarkdownText text={text} {...markdownProps} /></div>
   const snapshot = useSyncExternalStore(canvas.subscribe, canvas.getSnapshot)
   const [view, setView] = useState<View>('pending')
   const [todos, setTodos] = useState<Todo[]>([])
@@ -657,14 +664,14 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
               {detail.todo.status === 'in_review' && selectedRun !== undefined && <section className="dsh-personal-todo-review">
                 <h3><ClipboardCheck size={18} aria-hidden="true" />{t('detail.review')}</h3>
                 <dl>
-                  <div><dt><ClipboardList size={14} aria-hidden="true" />{t('review.summary')}</dt><dd>{selectedRun.resultSummary ?? '—'}</dd></div>
-                  <div><dt><CircleCheck size={14} aria-hidden="true" />{t('review.verification')}</dt><dd>{selectedRun.verification ?? '—'}</dd></div>
-                  <div><dt><Flag size={14} aria-hidden="true" />{t('review.risk')}</dt><dd>{selectedRun.risk ?? '—'}</dd></div>
+                  <div><dt><ClipboardList size={14} aria-hidden="true" />{t('review.summary')}</dt><dd>{markdown(selectedRun.resultSummary ?? '—')}</dd></div>
+                  <div><dt><CircleCheck size={14} aria-hidden="true" />{t('review.verification')}</dt><dd>{markdown(selectedRun.verification ?? '—')}</dd></div>
+                  <div><dt><Flag size={14} aria-hidden="true" />{t('review.risk')}</dt><dd>{markdown(selectedRun.risk ?? '—')}</dd></div>
                 </dl>
               </section>}
-              {detail.todo.notes !== null && <section className="dsh-personal-todo-detail-section"><h3>{t('field.notes')}</h3><p>{detail.todo.notes}</p></section>}
+              {detail.todo.notes !== null && <section className="dsh-personal-todo-detail-section"><h3>{t('field.notes')}</h3>{markdown(detail.todo.notes)}</section>}
               {detail.todo.archivedAt !== null && <div className="dsh-personal-todo-meta"><span>{t('meta.archived', { date: new Date(detail.todo.archivedAt).toLocaleString() })}</span></div>}
-              {detail.todo.blockedReason !== null && <div className="dsh-personal-todo-callout"><strong>{t('detail.waitingForYou')}</strong><p>{detail.todo.blockedReason}</p></div>}
+              {detail.todo.blockedReason !== null && <div className="dsh-personal-todo-callout"><strong>{t('detail.waitingForYou')}</strong>{markdown(detail.todo.blockedReason)}</div>}
 
               <section className="dsh-personal-todo-detail-section"><h3>{t('detail.conversations')}</h3>
               {detail.sessions.length === 0 ? <div className="dsh-personal-todo-session-empty"><MessageSquare size={18} aria-hidden="true" /><p>{t('detail.noConversations')}</p></div> : detail.sessions.map((session, index) => <button type="button" className="dsh-personal-todo-session" key={session.sessionId} aria-label={t('action.openConversation')} aria-describedby={`personal-todo-session-${index}`} disabled={busy} onClick={() => { openConversation(session.sessionId, session.parentSessionId) }}>
@@ -674,7 +681,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
               </button>)}
               </section>
               <section className="dsh-personal-todo-detail-section"><h3>{t('detail.activity')}</h3>
-              <div className="dsh-personal-todo-timeline">{detail.events.map(event => <div className="dsh-personal-todo-event" key={event.id}><CircleDot size={14} aria-hidden="true" /><div className="dsh-personal-todo-event-content"><strong>{eventLabel(event.type)}</strong>{event.message !== null && <p>{event.message}</p>}<time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time></div></div>)}</div>
+              <div className="dsh-personal-todo-timeline">{detail.events.map(event => <div className="dsh-personal-todo-event" key={event.id}><CircleDot size={14} aria-hidden="true" /><div className="dsh-personal-todo-event-content"><strong>{eventLabel(event.type)}</strong>{event.message !== null && markdown(event.message)}<time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time></div></div>)}</div>
               </section>
             </>}
             </section>

@@ -151,6 +151,7 @@ describe('Host Remote service and Agent tools', () => {
       notes: 'created by a tool',
       assignee: 'Alice',
       priority: 'high',
+      dueAt: '2026-09-20T10:00:00.000Z',
       tags: ['DSH'],
     } satisfies CreateTodoInput, run()) as Awaited<ReturnType<typeof ctx.personalTodo.create>>
 
@@ -164,6 +165,9 @@ describe('Host Remote service and Agent tools', () => {
       '标题：Shared state',
       '备注：created by a tool',
       '负责人：Alice',
+      '优先级：高',
+      '截止时间：2026-09-20T10:00:00.000Z',
+      '标签：["dsh"]',
     ].join('\n'))
 
     const agentRun = run(started.primarySessionId as string)
@@ -174,7 +178,7 @@ describe('Host Remote service and Agent tools', () => {
       verification: 'Tests passed',
       risk: null,
     }, agentRun)).toMatchObject({ status: 'in_review' })
-    expect(agentRun.concludeTurn).toHaveBeenCalledOnce()
+    expect(agentRun.concludeTurn).not.toHaveBeenCalled()
 
     expect(await ctx.personalTodo.approve({ id: added.id }, signal)).toMatchObject({ status: 'completed' })
     const listed = await tools.get('personal_todo_list')?.execute({ statuses: ['completed'] } satisfies ListTodoInput, run())
@@ -249,6 +253,13 @@ describe('Host Remote service and Agent tools', () => {
     expect(sessions.messages).toEqual([])
   })
 
+  it('启动消息明确显示未设置的元信息', async () => {
+    const { ctx, sessions } = await setup()
+    const todo = await ctx.personalTodo.create({ title: '最小待办' }, signal)
+    await ctx.personalTodo.start({ id: todo.id }, signal)
+    expect(sessions.messages[0]?.text).toContain('备注：无补充备注。\n负责人：未分配。\n优先级：未设置\n截止时间：未设置\n标签：无')
+  })
+
   it('surfaces an Agent question in the todo and delivers the user reply to the same Session', async () => {
     const { ctx, sessions, tools } = await setup()
     const todo = await ctx.personalTodo.create({ title: 'Clarify' }, signal)
@@ -258,7 +269,7 @@ describe('Host Remote service and Agent tools', () => {
     expect(await tools.get('personal_todo_block')?.execute({ id: todo.id, question: 'Which option?' }, agentRun)).toMatchObject({
       status: 'blocked', blockedReason: 'Which option?',
     })
-    expect(agentRun.concludeTurn).toHaveBeenCalledOnce()
+    expect(agentRun.concludeTurn).not.toHaveBeenCalled()
     expect(await ctx.personalTodo.reply({ id: todo.id, message: 'Use option A.' }, signal)).toMatchObject({ status: 'in_progress' })
     expect(sessions.messages.at(-1)?.text).toContain('Use option A.')
   })

@@ -36,6 +36,7 @@ interface TodoOrchestratorConfig {
 function taskPrompt(todo: Todo): string {
   const notes = todo.notes === null ? '无补充备注。' : todo.notes
   const assignee = todo.assignee === null ? '未分配。' : todo.assignee
+  const priority = { none: '未设置', low: '低', medium: '中', high: '高' }[todo.priority]
   return [
     `执行个人待办 ${todo.id}。`,
     '执行前请加载并遵循 personal-todo-execution Skill。',
@@ -43,6 +44,9 @@ function taskPrompt(todo: Todo): string {
     `标题：${todo.title}`,
     `备注：${notes}`,
     `负责人：${assignee}`,
+    `优先级：${priority}`,
+    `截止时间：${todo.dueAt ?? '未设置'}`,
+    `标签：${todo.tags.length === 0 ? '无' : JSON.stringify(todo.tags)}`,
   ].join('\n')
 }
 

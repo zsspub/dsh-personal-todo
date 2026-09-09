@@ -13,6 +13,9 @@ export declare const zh: {
     'action.add': string;
     'action.edit': string;
     'action.copy': string;
+    'markdown.copy': string;
+    'markdown.copied': string;
+    'markdown.footnotes': string;
     'action.start': string;
     'action.openConversation': string;
     'action.reply': string;
@@ -121,6 +124,9 @@ export declare const en: {
     'action.add': string;
     'action.edit': string;
     'action.copy': string;
+    'markdown.copy': string;
+    'markdown.copied': string;
+    'markdown.footnotes': string;
     'action.start': string;
     'action.openConversation': string;
     'action.reply': string;
