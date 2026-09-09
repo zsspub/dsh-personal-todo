@@ -1,5 +1,6 @@
 /** Personal todo Web panel dictionaries. */
 export declare const zh: {
+    'input.refine': string;
     'trigger.label': string;
     'trigger.aria': string;
     'trigger.attention': string;
@@ -8,13 +9,7 @@ export declare const zh: {
     'panel.close': string;
     'tab.archived': string;
     'tab.statuses': string;
-    'search.placeholder': string;
-    'search.aria': string;
-    'tags.placeholder': string;
-    'tags.aria': string;
     'action.more': string;
-    'action.apply': string;
-    'action.refresh': string;
     'action.add': string;
     'action.edit': string;
     'action.start': string;
@@ -28,15 +23,26 @@ export declare const zh: {
     'action.loadMore': string;
     'action.cancel': string;
     'action.save': string;
+    'action.createOnly': string;
     'action.create': string;
     'action.back': string;
     'state.loading': string;
     'state.loadingDetail': string;
     'state.emptyStatus': string;
     'state.emptyArchived': string;
+    'empty.pending': string;
+    'empty.in_progress': string;
+    'empty.blocked': string;
+    'empty.in_review': string;
+    'empty.completed': string;
+    'empty.cancelled': string;
+    'empty.archived': string;
+    'empty.create': string;
     'state.error': string;
     'state.assigneeUpdateMismatch': string;
     'state.sessionUnavailable': string;
+    'form.description': string;
+    'form.editDescription': string;
     'field.title': string;
     'field.notes': string;
     'field.assignee': string;
@@ -59,6 +65,8 @@ export declare const zh: {
     'priority.medium': string;
     'priority.high': string;
     'meta.due': string;
+    'meta.noDueDate': string;
+    'detail.title': string;
     'meta.completed': string;
     'meta.archived': string;
     'meta.assignee': string;
@@ -73,6 +81,8 @@ export declare const zh: {
     'reply.placeholder': string;
     'feedback.aria': string;
     'feedback.placeholder': string;
+    'review.actions': string;
+    'review.actionHint': string;
     'review.summary': string;
     'review.verification': string;
     'review.risk': string;
@@ -97,6 +107,7 @@ export declare const zh: {
 };
 export type PersonalTodoKey = keyof typeof zh;
 export declare const en: {
+    'input.refine': string;
     'trigger.label': string;
     'trigger.aria': string;
     'trigger.attention': string;
@@ -105,13 +116,7 @@ export declare const en: {
     'panel.close': string;
     'tab.archived': string;
     'tab.statuses': string;
-    'search.placeholder': string;
-    'search.aria': string;
-    'tags.placeholder': string;
-    'tags.aria': string;
     'action.more': string;
-    'action.apply': string;
-    'action.refresh': string;
     'action.add': string;
     'action.edit': string;
     'action.start': string;
@@ -125,15 +130,26 @@ export declare const en: {
     'action.loadMore': string;
     'action.cancel': string;
     'action.save': string;
+    'action.createOnly': string;
     'action.create': string;
     'action.back': string;
     'state.loading': string;
     'state.loadingDetail': string;
     'state.emptyStatus': string;
     'state.emptyArchived': string;
+    'empty.pending': string;
+    'empty.in_progress': string;
+    'empty.blocked': string;
+    'empty.in_review': string;
+    'empty.completed': string;
+    'empty.cancelled': string;
+    'empty.archived': string;
+    'empty.create': string;
     'state.error': string;
     'state.assigneeUpdateMismatch': string;
     'state.sessionUnavailable': string;
+    'form.description': string;
+    'form.editDescription': string;
     'field.title': string;
     'field.notes': string;
     'field.assignee': string;
@@ -156,6 +172,8 @@ export declare const en: {
     'priority.medium': string;
     'priority.high': string;
     'meta.due': string;
+    'meta.noDueDate': string;
+    'detail.title': string;
     'meta.completed': string;
     'meta.archived': string;
     'meta.assignee': string;
@@ -170,6 +188,8 @@ export declare const en: {
     'reply.placeholder': string;
     'feedback.aria': string;
     'feedback.placeholder': string;
+    'review.actions': string;
+    'review.actionHint': string;
     'review.summary': string;
     'review.verification': string;
     'review.risk': string;

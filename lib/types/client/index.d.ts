@@ -10,7 +10,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         personalTodo: PersonalTodoKey;
     }
     interface SlotMap {
-        /** Root-scoped layer used to project the todo Canvas over the opened details column. */
+        /** Root-scoped layer hosting the floating personal todo drawer. */
         'shell.overlay': {
             kind: 'list';
             scope: 'root';

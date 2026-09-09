@@ -13,6 +13,7 @@ English | [中文](README.zh.md)
 
 ## Features
 
+- Type `@` in chat to browse Pending, In progress, Waiting for reply, or In review categories. Press Tab to drill into todos, then select one to insert a reference. Completed, cancelled, and archived items from More are excluded. Type within a category to search titles, notes, or assignees (up to 50 results); sending resolves the latest todo details. Requires DSH `ui-input-trigger >=0.1.2-rc.1`.
 - Durable SQLite storage with schema versioning, WAL, foreign keys, a busy timeout, and owner-only filesystem permissions.
 - One durable root Session per started todo, reused for blocked replies and review changes.
 - Automatic discovery of delegated child Sessions, including nested children, as related todo conversations.
@@ -21,7 +22,7 @@ English | [中文](README.zh.md)
 - Explicit `pending`, `in_progress`, `blocked`, `in_review`, `completed`, and `cancelled` task states; only user approval completes a task.
 - Durable run, Session-link, and activity history alongside the current todo snapshot.
 - Agent tools for creation, query, editing, progress, blocking questions, review submission, and deletion.
-- A non-modal right-side Canvas with counted active-status tabs, a dedicated New/Refresh/More action row, always-visible search and tag filters, assignee-grouped todo cards, two-line card summaries, click-through todo details, inline blocked replies, review summaries, change requests, activity history, and conversation navigation.
+- A non-modal floating right-side drawer in the shell overlay, with rounded corners, responsive edge spacing, a right-aligned New button on its own first row, counted active-status tabs and an icon-only More menu on the second row, assignee-grouped todo cards, two-line card summaries, click-through todo details, inline blocked replies, review summaries, change requests, activity history, and conversation navigation.
 - Todos in any lifecycle state can move to a separate archive view, then return to the matching list or be permanently deleted.
 - Typed English and Chinese client dictionaries.
 
@@ -64,7 +65,7 @@ Lists show every active workflow state and exclude archived records by default. 
 
 ## Task flow
 
-Creating a todo in the Web task center starts it immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. A todo that explicitly assigns the work to Codex uses `personal_todo_delegate_codex`: the Host serializes the stored title and notes, while a monotonic Tool guard denies direct `codex_task` calls from the active primary Session and every linked descendant. Other tasks may use a delegate or equivalent subagent for independent workstreams; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. The sidebar count surfaces blocked and review-ready work without opening the task center. After a DSH process restart, the plugin resumes durable `in_progress` runs whose Agent is not already running. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
+In the Web task center, Create saves a pending todo; Create and start also starts execution immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. A todo that explicitly assigns the work to Codex uses `personal_todo_delegate_codex`: the Host serializes the stored title and notes, while a monotonic Tool guard denies direct `codex_task` calls from the active primary Session and every linked descendant. Other tasks may use a delegate or equivalent subagent for independent workstreams; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. The sidebar count surfaces blocked and review-ready work without opening the task center. After a DSH process restart, the plugin resumes durable `in_progress` runs whose Agent is not already running. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
 
 ## Configuration
 

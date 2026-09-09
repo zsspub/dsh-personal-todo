@@ -11,6 +11,7 @@ import personalTodoRemote from 'dsh-personal-todo/remote'
 import {
   PersonalTodoCanvas, PersonalTodoTrigger, type PersonalTodoPanelInjected,
 } from './PersonalTodoPanel.tsx'
+import { createTodoInputSource } from './input-source.ts'
 import { PersonalTodoCanvasController } from './canvas.ts'
 import { en, NS, zh, type PersonalTodoKey } from './locales.ts'
 
@@ -26,12 +27,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     personalTodo: PersonalTodoKey
   }
   interface SlotMap {
-    /** Root-scoped layer used to project the todo Canvas over the opened details column. */
+    /** Root-scoped layer hosting the floating personal todo drawer. */
     'shell.overlay': { kind: 'list'; scope: 'root' }
   }
 }
 
-export const inject = ['slots', 'locale', 'remote', 'sessions', 'layout']
+export const inject = ['slots', 'locale', 'remote', 'sessions']
 
 function remoteFailure(result: { readonly error: { readonly message: string; readonly code: string } }): Error {
   return new Error(`${result.error.message} (${result.error.code})`)
@@ -46,14 +47,8 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const sessions = (scope as unknown as { readonly sessions: ISessions }).sessions
     const panel = (): PersonalTodoPanelInjected => ({
       canvas,
-      openCanvas: () => {
-        scope.layout.openDetails()
-        canvas.open()
-      },
-      closeCanvas: () => {
-        canvas.close()
-        scope.layout.closeDetails()
-      },
+      openCanvas: () => { canvas.open() },
+      closeCanvas: () => { canvas.close() },
       list: async (request, signal) => {
         const result = await scope.remote.personalTodo.list(request, signal)
         if (!result.ok) throw remoteFailure(result)
@@ -129,6 +124,21 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         sessions.openSubagent({ parentSessionId, childSessionId: sessionId, mode: child.mode } satisfies SubagentAddress)
         return true
       },
+    })
+    scope.inject(['inputTriggers'], inputScope => {
+      const t = inputScope.locale.bind(NS)
+      inputScope.effect(() => inputScope.inputTriggers.registerSource(createTodoInputSource({
+        list: async (request, signal) => {
+          const result = await inputScope.remote.personalTodo.list(request, signal)
+          if (!result.ok) throw remoteFailure(result)
+          return result.value
+        },
+        get: async (id, signal) => {
+          const result = await inputScope.remote.personalTodo.get({ id }, signal)
+          if (!result.ok) throw remoteFailure(result)
+          return result.value
+        },
+      }, t)), 'personal-todo: input references')
     })
     scope.slots.inject('sidebar.footer.action', () => scope.slots.register({
       name: 'sidebar.footer.action',

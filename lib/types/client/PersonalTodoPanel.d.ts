@@ -23,6 +23,6 @@ export interface PersonalTodoPanelInjected {
 export type PersonalTodoTriggerProps = PropsRuntime<'sidebar.footer.action'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected;
 export type PersonalTodoCanvasProps = PropsRuntime<'shell.overlay'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected;
 /** Sidebar action opening the task Canvas and surfacing attention work. */
-export declare function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas }: PersonalTodoTriggerProps): React.JSX.Element;
-/** Task-driven personal todo Canvas rendered on the right side of the frame. */
+export declare function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, closeCanvas }: PersonalTodoTriggerProps): React.JSX.Element;
+/** Task-driven personal todo drawer floating in the shell overlay. */
 export declare function PersonalTodoCanvas(props: PersonalTodoCanvasProps): React.JSX.Element | null;

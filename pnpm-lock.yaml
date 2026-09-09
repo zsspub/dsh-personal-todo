@@ -11,6 +11,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: 3.18.1-rc.4
         version: 3.18.1-rc.4
+      lucide-react:
+        specifier: ^1.42.0
+        version: 1.42.0(react@18.3.1)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -27,6 +30,9 @@ importers:
       '@deepseek-ai/dsh-client-runtime':
         specifier: 0.1.1-rc.2
         version: 0.1.1-rc.2(2f4dcdcf15457b70a5ab144cfb18aa72)
+      '@deepseek-ai/dsh-client-ui-input-trigger':
+        specifier: 0.1.2-rc.1
+        version: 0.1.2-rc.1(@deepseek-ai/cordis@4.0.1)
       '@deepseek-ai/dsh-client-ui-layout':
         specifier: 0.1.1-rc.2
         version: 0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-client-runtime@0.1.1-rc.2(2f4dcdcf15457b70a5ab144cfb18aa72))(@deepseek-ai/dsh-client-ui-theme@0.1.1-rc.2(758b138596d61fc97ae8b6b61512ce8e))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))
@@ -329,6 +335,11 @@ packages:
       '@deepseek-ai/dsh-tools': ^0.1.1-rc.2
       '@deepseek-ai/dsh-typert-protocol': ^0.1.1-rc.2
       '@deepseek-ai/dsh-typert-registry': ^0.1.1-rc.2
+
+  '@deepseek-ai/dsh-client-ui-input-trigger@0.1.2-rc.1':
+    resolution: {integrity: sha512-TqdW8VLfNUQYg4g+hVKn22lzpUFMWYbziSBNvi8KVg+aK+SiX+q2UHSGbUQzfYy6TGz+d9HHG9gts7Um/5cHLw==}
+    peerDependencies:
+      '@deepseek-ai/cordis': ^4.0.2
 
   '@deepseek-ai/dsh-client-ui-layout@0.1.1-rc.2':
     resolution: {integrity: sha512-y7xSQyQYGuahLyJcSXpB+JbH1F5lGEc3L9K8cjLy5vd/L9N6gLFLWyeGdlGxxM4jxRt1+rAHDDZ/zl7b8GC5zQ==}
@@ -2115,6 +2126,11 @@ packages:
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
 
+  lucide-react@1.42.0:
+    resolution: {integrity: sha512-b3jprplnoLS8n5etw1z8xODe3hF/yjKATrTitsrKrnjUhCef5BdDct6Ppv3zVvzFwmtfWgLO6XNM3C9fAD93ug==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
   lz-string@1.5.0:
     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
     hasBin: true
@@ -3038,6 +3054,11 @@ snapshots:
     transitivePeerDependencies:
       - '@types/react'
       - react
+
+  '@deepseek-ai/dsh-client-ui-input-trigger@0.1.2-rc.1(@deepseek-ai/cordis@4.0.1)':
+    dependencies:
+      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+      clsx: 2.1.1
 
   '@deepseek-ai/dsh-client-ui-layout@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-client-runtime@0.1.1-rc.2(2f4dcdcf15457b70a5ab144cfb18aa72))(@deepseek-ai/dsh-client-ui-theme@0.1.1-rc.2(758b138596d61fc97ae8b6b61512ce8e))(@deepseek-ai/dsh-invariants@0.1.1-rc.2(@deepseek-ai/cordis@4.0.1))':
     dependencies:
@@ -4677,6 +4698,10 @@ snapshots:
   loupe@3.2.1: {}
 
   lru-cache@10.4.3: {}
+
+  lucide-react@1.42.0(react@18.3.1):
+    dependencies:
+      react: 18.3.1
 
   lz-string@1.5.0: {}
 
