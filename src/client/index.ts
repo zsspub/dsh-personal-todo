@@ -6,12 +6,14 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ISessions, SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import personalTodoRemote from 'dsh-personal-todo/remote'
 import {
   PersonalTodoCanvas, PersonalTodoTrigger, type PersonalTodoPanelInjected,
 } from './PersonalTodoPanel.tsx'
 import { createTodoInputSource } from './input-source.ts'
+import { installTodoInputIcon } from './input-source-icon.ts'
 import { PersonalTodoCanvasController } from './canvas.ts'
 import { en, NS, zh, type PersonalTodoKey } from './locales.ts'
 
@@ -21,18 +23,17 @@ export type {
 } from './PersonalTodoPanel.tsx'
 export type { PersonalTodoKey } from './locales.ts'
 
+const PERSONAL_TODO_TAB_ID = 'dsh-personal-todo'
+const PERSONAL_TODO_TAB_KIND = 'personal-todo'
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** 个人待办面板的控件和状态文案。 */
     personalTodo: PersonalTodoKey
   }
-  interface SlotMap {
-    /** 承载个人待办悬浮抽屉的根级图层。 */
-    'shell.overlay': { kind: 'list'; scope: 'root' }
-  }
 }
 
-export const inject = ['slots', 'locale', 'remote', 'sessions']
+export const inject = ['slots', 'locale', 'remote', 'sessions', 'sidebarRight', 'sidebarRightTabs']
 
 function remoteFailure(result: { readonly error: { readonly message: string; readonly code: string } }): Error {
   return new Error(`${result.error.message} (${result.error.code})`)
@@ -47,10 +48,26 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const sessions = (scope as unknown as { readonly sessions: ISessions }).sessions
     const panel = (): PersonalTodoPanelInjected => ({
       canvas,
-      openCanvas: () => { canvas.open() },
-      closeCanvas: () => { canvas.close() },
+      openCanvas: () => {
+        try {
+          scope.sidebarRight.openTab(PERSONAL_TODO_TAB_KIND)
+        } catch (error) {
+          if (error instanceof Error && error.message === 'sidebarRight: no session surface is mounted') return
+          throw error
+        }
+      },
       list: async (request, signal) => {
         const result = await scope.remote.personalTodo.list(request, signal)
+        if (!result.ok) throw remoteFailure(result)
+        return result.value
+      },
+      exportData: async (signal) => {
+        const result = await scope.remote.personalTodo.exportData({}, signal)
+        if (!result.ok) throw remoteFailure(result)
+        return result.value
+      },
+      importData: async (request, signal) => {
+        const result = await scope.remote.personalTodo.importData(request, signal)
         if (!result.ok) throw remoteFailure(result)
         return result.value
       },
@@ -127,6 +144,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     })
     scope.inject(['inputTriggers'], inputScope => {
       const t = inputScope.locale.bind(NS)
+      inputScope.effect(installTodoInputIcon, 'personal-todo: reference icons')
       inputScope.effect(() => inputScope.inputTriggers.registerSource(createTodoInputSource({
         list: async (request, signal) => {
           const result = await inputScope.remote.personalTodo.list(request, signal)
@@ -140,6 +158,12 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         },
       }, t)), 'personal-todo: input references')
     })
+    const t = scope.locale.bind(NS)
+    scope.effect(() => scope.sidebarRightTabs.register({
+      id: PERSONAL_TODO_TAB_ID,
+      kind: PERSONAL_TODO_TAB_KIND,
+      title: () => t('panel.title'),
+    }), 'personal-todo: right sidebar tab type')
     scope.slots.inject('sidebar.footer.action', () => scope.slots.register({
       name: 'sidebar.footer.action',
       id: 'personal-todo',
@@ -147,10 +171,9 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       locale: NS,
       inject: panel,
     }, PersonalTodoTrigger))
-    scope.slots.inject('shell.overlay', () => scope.slots.register({
-      name: 'shell.overlay',
-      id: 'personal-todo',
-      order: 40,
+    scope.slots.inject('sidebar.right.pane.tab', () => scope.slots.register({
+      name: 'sidebar.right.pane.tab',
+      key: PERSONAL_TODO_TAB_ID,
       locale: NS,
       inject: panel,
     }, PersonalTodoCanvas))

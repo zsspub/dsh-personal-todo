@@ -1,12 +1,13 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { userEvent } from '@testing-library/user-event'
-import React, { type ComponentProps } from 'react'
+import React, { type ComponentProps, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   PersonalTodoCanvas, PersonalTodoTrigger, type PersonalTodoPanelInjected,
 } from '../src/client/PersonalTodoPanel.tsx'
 import { PersonalTodoCanvasController } from '../src/client/canvas.ts'
+import { parseTodoBackup, TODO_BACKUP_MAX_BYTES } from '../src/backup.ts'
 import { en, zh } from '../src/client/locales.ts'
 import type {
   CreateTodoInput, ListTodoInput, Todo, TodoCounts, TodoDetail, TodoListResult, TodoSession, UpdateTodoRequest,
@@ -121,8 +122,32 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
   return {
     canvas: new PersonalTodoCanvasController(),
     openCanvas: vi.fn(),
-    closeCanvas: vi.fn(),
     rows,
+    exportData: vi.fn(async (signal: AbortSignal) => {
+      signal.throwIfAborted()
+      return {
+        filename: 'personal-todo-test.json',
+        json: JSON.stringify({ format: 'dsh-personal-todo', version: 1, exportedAt: '2026-09-14T10:00:00.000Z', todos: rows.map(row => detail(row)) }),
+      }
+    }),
+    importData: vi.fn(async (request: { json: string }, signal: AbortSignal) => {
+      signal.throwIfAborted()
+      const backup = parseTodoBackup(request.json)
+      let imported = 0
+      let skipped = 0
+      let resetToPending = 0
+      for (const entry of backup.todos) {
+        if (rows.some(row => row.id === entry.todo.id)) {
+          skipped++
+          continue
+        }
+        const reset = entry.todo.status === 'in_progress'
+        rows.push({ ...entry.todo, status: reset ? 'pending' : entry.todo.status, activeRunId: reset ? null : entry.todo.activeRunId })
+        imported++
+        if (reset) resetToPending++
+      }
+      return { imported, skipped, resetToPending }
+    }),
     list: vi.fn(async (request: ListTodoInput, signal: AbortSignal) => {
       signal.throwIfAborted()
       const statuses = request.statuses ?? ['pending', 'in_progress', 'blocked', 'in_review']
@@ -209,24 +234,30 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
   }
 }
 
-function TodoSurface({ service, wide = true }: { service: PersonalTodoPanelInjected; wide?: boolean }) {
+function TodoSurface({ service, wide = true, current = true }: { service: PersonalTodoPanelInjected; wide?: boolean; current?: boolean }) {
+  const snapshot = useSyncExternalStore(service.canvas.subscribe, service.canvas.getSnapshot)
   const surfaceService: PersonalTodoPanelInjected = {
     ...service,
     openCanvas: () => {
       service.openCanvas()
       service.canvas.open()
     },
-    closeCanvas: () => {
-      service.closeCanvas()
-      service.canvas.close()
-    },
   }
   return (
     <>
-      <PersonalTodoTrigger {...{ wide, t, ...surfaceService } as ComponentProps<typeof PersonalTodoTrigger>} />
+      <PersonalTodoTrigger {...{
+        wide,
+        t,
+        ...surfaceService,
+        useSessions: (select: (state: { current?: string }) => unknown) => select(current ? { current: 'session-1' } : {}),
+      } as ComponentProps<typeof PersonalTodoTrigger>} />
       <div data-testid="frame">
-        <div data-shell-overlay>
-          <PersonalTodoCanvas {...{ t, ...surfaceService } as ComponentProps<typeof PersonalTodoCanvas>} />
+        <div data-sidebar-right-panel>
+          {snapshot.open && <PersonalTodoCanvas {...{
+            t,
+            ...surfaceService,
+            useTabInfo: () => ({ tab: { visible: true } }),
+          } as ComponentProps<typeof PersonalTodoCanvas>} />}
         </div>
       </div>
     </>
@@ -236,10 +267,114 @@ function TodoSurface({ service, wide = true }: { service: PersonalTodoPanelInjec
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 
 describe('PersonalTodoCanvas', () => {
+  function backupFile(rows: Todo[] = [], json?: string): File {
+    const content = json ?? JSON.stringify({
+      format: 'dsh-personal-todo', version: 1, exportedAt: '2026-09-14T10:00:00.000Z',
+      todos: rows.map(row => {
+        const snapshot = detail(row)
+        return { ...snapshot, events: snapshot.events.map(event => ({ ...event, id: `${row.id}-${event.id}` })) }
+      }),
+    })
+    const file = new File([content], '备份.json', { type: 'application/json' })
+    Object.defineProperty(file, 'text', { value: async () => content })
+    return file
+  }
+
+  it('数据菜单下载完整 JSON 并释放下载 URL', async () => {
+    const user = userEvent.setup()
+    const service = api([todo(), todo({ id: 'archived', archivedAt: '2026-01-01T00:00:00.000Z' })])
+    const createUrl = vi.fn(() => 'blob:todo-backup')
+    const revokeUrl = vi.fn()
+    vi.stubGlobal('URL', class extends URL {
+      static override createObjectURL = createUrl
+      static override revokeObjectURL = revokeUrl
+    })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      expect(this.download).toBe('personal-todo-test.json')
+      expect(this.href).toBe('blob:todo-backup')
+    })
+    render(<TodoSurface service={service} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    await user.click(await screen.findByRole('button', { name: '数据' }))
+    await user.click(screen.getByRole('menuitem', { name: '导出 JSON' }))
+    expect(await screen.findByText('备份已生成并请求下载。')).toBeTruthy()
+    expect(service.exportData).toHaveBeenCalledTimes(1)
+    expect(createUrl).toHaveBeenCalledWith(expect.any(Blob))
+    expect(click).toHaveBeenCalledOnce()
+    await waitFor(() => { expect(revokeUrl).toHaveBeenCalledWith('blob:todo-backup') })
+    expect(document.querySelector('a[download]')).toBeNull()
+  })
+
+  it('确认前不导入，取消后可重选同一文件，成功刷新计数且保留筛选', async () => {
+    const user = userEvent.setup()
+    const service = api([todo()])
+    render(<TodoSurface service={service} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    await user.click(await screen.findByRole('tab', { name: 'In progress 0' }))
+    const file = backupFile([todo(), todo({ id: 'new', status: 'in_progress', activeRunId: 'run-1', primarySessionId: 'session-1' })])
+    const input = screen.getByLabelText('选择 JSON 备份')
+    await user.upload(input, file)
+    const dialog = await screen.findByRole('dialog', { name: '确认导入备份' })
+    expect(within(dialog).getByText(/共 2 项待办，其中 1 项正在执行/u)).toBeTruthy()
+    expect(service.importData).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(service.importData).not.toHaveBeenCalled()
+    await user.upload(input, file)
+    await user.click(within(await screen.findByRole('dialog', { name: '确认导入备份' })).getByRole('button', { name: '确认导入' }))
+    expect(await screen.findByText('导入完成：新增 1 项，跳过 1 项，其中 1 项已转为待处理。')).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'In progress 0' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'Pending 2' })).toBeTruthy()
+    expect(service.canvas.getSnapshot().attentionCount).toBe(2)
+    expect(service.importData).toHaveBeenCalledTimes(1)
+  })
+
+  it('导入失败保留预览并允许重试，处理中禁止重复提交', async () => {
+    const user = userEvent.setup()
+    const service = api([])
+    vi.mocked(service.importData).mockRejectedValueOnce(new Error('导入冲突'))
+    render(<TodoSurface service={service} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    await user.upload(await screen.findByLabelText('选择 JSON 备份'), backupFile())
+    await user.click(screen.getByRole('button', { name: '确认导入' }))
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', '备份操作失败：导入冲突')
+    let finish: ((value: { imported: number; skipped: number; resetToPending: number }) => void) | undefined
+    vi.mocked(service.importData).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await user.click(screen.getByRole('button', { name: '确认导入' }))
+    const dialog = screen.getByRole('dialog', { name: '确认导入备份' })
+    expect((within(dialog).getByRole('button', { name: '正在处理备份…' }) as HTMLButtonElement).disabled).toBe(true)
+    await user.click(within(dialog).getByRole('button', { name: '正在处理备份…' }))
+    await user.click(within(dialog).getByRole('button', { name: '关闭导入确认' }))
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(service.importData).toHaveBeenCalledTimes(2)
+    await act(async () => { finish?.({ imported: 0, skipped: 0, resetToPending: 0 }) })
+    expect(await screen.findByText(/导入完成/u)).toBeTruthy()
+  })
+
+  it('文件校验与导出失败使用独立错误提示，不调用导入接口', async () => {
+    const user = userEvent.setup()
+    const service = api([])
+    render(<TodoSurface service={service} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    const input = await screen.findByLabelText('选择 JSON 备份')
+    await user.upload(input, backupFile([], '{'))
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('不是有效的 JSON'))
+    const oversized = backupFile()
+    Object.defineProperty(oversized, 'size', { value: TODO_BACKUP_MAX_BYTES + 1 })
+    await user.upload(input, oversized)
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('20 MiB'))
+    expect(service.importData).not.toHaveBeenCalled()
+    vi.mocked(service.exportData).mockRejectedValueOnce(new Error('网络错误'))
+    await user.click(screen.getByRole('button', { name: '数据' }))
+    await user.click(screen.getByRole('menuitem', { name: '导出 JSON' }))
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', '备份操作失败：网络错误')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('将摘要、验证、风险、备注和活动渲染为安全的 Markdown', async () => {
     const user = userEvent.setup()
     const source = todo({
@@ -327,7 +462,7 @@ describe('PersonalTodoCanvas', () => {
     await waitFor(() => { expect(service.rows).toHaveLength(2) })
   })
 
-  it('closes on outside clicks and toggles from the sidebar without retaining an open form', async () => {
+  it('重复点击侧栏入口时聚焦同一个宿主 Tab，并保留正在编辑的表单', async () => {
     const user = userEvent.setup()
     const service = api()
     render(<TodoSurface service={service} />)
@@ -335,17 +470,23 @@ describe('PersonalTodoCanvas', () => {
     await user.click(trigger)
     await user.click(screen.getByRole('button', { name: 'New todo' }))
     await user.click(trigger)
-    expect(screen.queryByRole('region', { name: 'Personal Todos' })).toBeNull()
-    await user.click(trigger)
-    expect(screen.queryByRole('textbox', { name: 'Title' })).toBeNull()
+    expect(screen.getByRole('textbox', { name: 'Title' })).toBeTruthy()
     expect(screen.getByRole('region', { name: 'Personal Todos' })).toBeTruthy()
-    await user.click(screen.getByTestId('frame'))
-    expect(screen.queryByRole('region', { name: 'Personal Todos' })).toBeNull()
-    expect(service.closeCanvas).toHaveBeenCalledTimes(2)
+    expect(service.openCanvas).toHaveBeenCalledTimes(2)
   })
 
   it('keeps English and Chinese dictionaries structurally aligned', () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort())
+  })
+
+  it('没有当前会话时禁用入口，避免调用未挂载的右栏服务', async () => {
+    const user = userEvent.setup()
+    const service = api()
+    render(<TodoSurface service={service} current={false} />)
+    const trigger = screen.getByRole('button', { name: /personal todos/i })
+    expect((trigger as HTMLButtonElement).disabled).toBe(true)
+    await user.click(trigger)
+    expect(service.openCanvas).not.toHaveBeenCalled()
   })
 
   it('renders a full-width text action in a wide sidebar and an icon in a narrow sidebar', () => {
@@ -361,17 +502,62 @@ describe('PersonalTodoCanvas', () => {
     expect(screen.getByRole('button', { name: /personal todos/i }).textContent).toBe('')
   })
 
-  it('shows blocked and review work on the sidebar action while the panel is closed', async () => {
+  it('侧栏计入待开始、待补充、待审核，排除执行中及历史待办', async () => {
     const service = api([
       todo({ id: 'blocked', status: 'blocked', blockedReason: 'Need input' }),
       todo({ id: 'review', status: 'in_review', latestSummary: 'Ready' }),
       todo({ id: 'pending' }),
+      todo({ id: 'running', status: 'in_progress' }),
+      todo({ id: 'completed', status: 'completed' }),
+      todo({ id: 'cancelled', status: 'cancelled' }),
+      todo({ id: 'archived', archivedAt: '2026-01-03T00:00:00.000Z' }),
     ])
     render(<TodoSurface service={service} />)
 
-    const trigger = await screen.findByRole('button', { name: '2 personal todos require attention' })
-    expect(within(trigger).getByText('2')).toBeTruthy()
+    const trigger = await screen.findByRole('button', { name: '3 personal todos require attention' })
+    expect(within(trigger).getByText('3')).toBeTruthy()
     expect(screen.queryByRole('dialog', { name: 'Personal Todos' })).toBeNull()
+  })
+
+  it.each([false, true])('Agent 新增待办后自动更新侧栏和已打开的空面板（打开：%s）', async (open) => {
+    vi.useFakeTimers()
+    const service = api()
+    if (open) service.canvas.open()
+    const rendered = render(<TodoSurface service={service} />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    service.rows.push(todo({ title: 'Agent 新增待办' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    if (open) {
+      expect(screen.getByRole('tab', { name: 'Pending 1' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Agent 新增待办/ })).toBeTruthy()
+      await act(async () => { service.canvas.close() })
+      vi.mocked(service.list).mockClear()
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+      expect(service.list).toHaveBeenCalledTimes(1)
+      expect(service.list).toHaveBeenCalledWith(expect.objectContaining({ limit: 1 }), expect.any(AbortSignal))
+    }
+    expect(screen.getByRole('button', { name: '1 personal todos require attention' })).toBeTruthy()
+    rendered.unmount()
+    vi.mocked(service.list).mockClear()
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    expect(service.list).not.toHaveBeenCalled()
+  })
+
+  it('只在宿主右栏 Tab 可见时读取内容', async () => {
+    const service = api()
+    const view = render(<PersonalTodoCanvas {...{
+      t,
+      ...service,
+      useTabInfo: () => ({ tab: { visible: false } }),
+    } as unknown as ComponentProps<typeof PersonalTodoCanvas>} />)
+    expect(service.list).not.toHaveBeenCalled()
+
+    view.rerender(<PersonalTodoCanvas {...{
+      t,
+      ...service,
+      useTabInfo: () => ({ tab: { visible: true } }),
+    } as unknown as ComponentProps<typeof PersonalTodoCanvas>} />)
+    await waitFor(() => expect(service.list).toHaveBeenCalledOnce())
   })
 
   it('switches active statuses with tabs and history statuses from the more menu', async () => {
@@ -445,7 +631,7 @@ describe('PersonalTodoCanvas', () => {
     expect(screen.getByRole('button', { name: /Needs owner/ })).toBeTruthy()
   })
 
-  it('opens in the overlay without a details column, clamps card descriptions, and reveals full details', async () => {
+  it('opens in the host right Sidebar Tab, clamps card descriptions, and reveals full details', async () => {
     const user = userEvent.setup()
     const notes = 'First line\nSecond line\nThird line with the remaining task detail.'
     const service = api([todo({ notes })])
@@ -457,7 +643,7 @@ describe('PersonalTodoCanvas', () => {
     const canvas = await screen.findByRole('region', { name: 'Personal Todos' })
     expect(canvas.classList.contains('dsh-personal-todo-canvas')).toBe(true)
     expect(service.openCanvas).toHaveBeenCalledOnce()
-    expect(canvas.closest('[data-shell-overlay]')).not.toBeNull()
+    expect(canvas.closest('[data-sidebar-right-panel]')).not.toBeNull()
     const card = within(canvas).getByRole('button', { name: /Ship plugin/ })
     expect(card.querySelector('p')?.textContent).toBe(notes)
     expect(document.querySelector('style')?.textContent).toContain('-webkit-line-clamp:2')
@@ -468,9 +654,7 @@ describe('PersonalTodoCanvas', () => {
     await user.click(within(canvas).getByRole('button', { name: 'Back to list' }))
     expect([...canvas.querySelectorAll('p')].filter(node => node.textContent === notes)).toHaveLength(1)
 
-    await user.click(within(canvas).getByRole('button', { name: 'Close todo panel' }))
-    expect(service.closeCanvas).toHaveBeenCalledOnce()
-    expect(screen.queryByRole('region', { name: 'Personal Todos' })).toBeNull()
+    expect(within(canvas).queryByRole('button', { name: 'Close todo panel' })).toBeNull()
   })
 
   it.each([null, '2026-09-15T10:30:00.000Z'])('shows the due date and header back navigation for %s', async (dueAt) => {
@@ -547,7 +731,7 @@ describe('PersonalTodoCanvas', () => {
     expect(await screen.findByText('Primary execution conversation')).toBeTruthy()
     await user.click(screen.getAllByRole('button', { name: 'Open conversation' })[0] as HTMLElement)
     expect(service.openSession).toHaveBeenCalledWith('session-todo-1', null)
-    expect(screen.queryByRole('region', { name: 'Personal Todos' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Personal Todos' })).toBeTruthy()
   })
 
   it('reports a stale Host when an assignee update is silently discarded', async () => {
@@ -620,6 +804,24 @@ describe('PersonalTodoCanvas', () => {
     await user.click(screen.getByRole('button', { name: 'Reply and continue' }))
     await waitFor(() => expect(service.reply).toHaveBeenCalledWith({ id: 'todo-1', message: 'Use option A' }, expect.any(AbortSignal)))
     expect(service.rows[0]).toMatchObject({ status: 'in_progress', blockedReason: null })
+  })
+
+  it.each([
+    ['pending', /Pending/], ['in_progress', /In progress/], ['blocked', /Waiting for me/],
+  ] as const)('用户从 %s 详情直接完成待办并在完成列表查看', async (status, tab) => {
+    const user = userEvent.setup()
+    const service = api([todo({ status })])
+    render(<TodoSurface service={service} />)
+    await user.click(screen.getByRole('button', { name: /personal todos/i }))
+    await user.click(screen.getByRole('tab', { name: tab }))
+    await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    await user.click(await screen.findByRole('button', { name: 'Mark complete' }))
+    await waitFor(() => expect(service.approve).toHaveBeenCalledWith('todo-1', expect.any(AbortSignal)))
+    await waitFor(() => expect(service.rows[0]).toMatchObject({ status: 'completed', activeRunId: null }))
+    expect(screen.queryByRole('button', { name: 'Mark complete' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: /More/ }))
+    await user.click(screen.getByRole('menuitem', { name: 'Completed 1' }))
+    expect(await screen.findByRole('button', { name: /Ship plugin/ })).toBeTruthy()
   })
 
   it('approves a review or returns feedback to in-progress', async () => {
@@ -762,7 +964,7 @@ describe('PersonalTodoCanvas', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('shows load failures and aborts an in-flight read when the panel closes', async () => {
+  it('shows load failures and aborts an in-flight read when the host tab unmounts', async () => {
     const user = userEvent.setup()
     let aborted = false
     let fail = false
@@ -774,7 +976,7 @@ describe('PersonalTodoCanvas', () => {
       })) }
     render(<TodoSurface service={service} />)
     await user.click(screen.getByRole('button', { name: /personal todos/i }))
-    await user.click(screen.getByRole('button', { name: 'Close todo panel' }))
+    await act(async () => { service.canvas.close() })
     expect(aborted).toBe(true)
     fail = true
     await user.click(screen.getByRole('button', { name: /personal todos/i }))

@@ -1,6 +1,25 @@
 /** 个人待办 Web 面板的多语言词典。 */
 
+const transfer = {
+  'data.menu': '数据',
+  'data.export': '导出 JSON',
+  'data.import': '导入 JSON',
+  'data.file': '选择 JSON 备份',
+  'data.confirmTitle': '确认导入备份',
+  'data.confirm': '确认导入',
+  'data.close': '关闭导入确认',
+  'data.preview': '文件：{filename}；共 {count} 项待办，其中 {running} 项正在执行。',
+  'data.warning': '已有待办 ID 将整项跳过，不覆盖本地数据。新增的执行中待办将转为待处理，须手动开始执行。',
+  'data.sessions': '备份不包含会话正文、附件或配置。原 DSH 会话不存在时，待回复、审核修改和历史对话跳转无法通过此次导入恢复。',
+  'data.busy': '正在处理备份…',
+  'data.exported': '备份已生成并请求下载。',
+  'data.imported': '导入完成：新增 {imported} 项，跳过 {skipped} 项，其中 {resetToPending} 项已转为待处理。',
+  'data.error': '备份操作失败：{message}',
+  'data.tooLarge': '备份 JSON 超过 20 MiB 限制，请缩小数据量后重试。',
+} as const
+
 export const zh = {
+  ...transfer,
   'input.refine': '显示前 50 项，输入关键词筛选',
   'trigger.label': '待办',
   'trigger.aria': '打开个人待办',
@@ -21,6 +40,7 @@ export const zh = {
   'action.openConversation': '查看对话',
   'action.reply': '回复并继续',
   'action.approve': '审核通过',
+  'action.complete': '标记完成',
   'action.requestChanges': '提出修改意见',
   'action.delete': '删除',
   'action.archive': '归档',
@@ -39,7 +59,7 @@ export const zh = {
   'empty.in_progress': '开始执行待办后，可在这里查看进展。',
   'empty.blocked': '暂时没有需要你回复的问题。',
   'empty.in_review': 'Agent 提交结果后，会在这里等待你审核。',
-  'empty.completed': '审核通过的待办会保留在这里。',
+  'empty.completed': '已完成的待办会保留在这里。',
   'empty.cancelled': '已取消的待办会保留在这里。',
   'empty.archived': '归档后的待办会收纳在这里，随时可以恢复。',
   'empty.create': '创建一个待办',
@@ -114,6 +134,7 @@ export const zh = {
 export type PersonalTodoKey = keyof typeof zh
 
 export const en = {
+  ...transfer,
   'input.refine': 'First 50 shown; type to filter',
   'trigger.label': 'Todos',
   'trigger.aria': 'Open personal todos',
@@ -134,6 +155,7 @@ export const en = {
   'action.openConversation': 'Open conversation',
   'action.reply': 'Reply and continue',
   'action.approve': 'Approve',
+  'action.complete': 'Mark complete',
   'action.requestChanges': 'Request changes',
   'action.delete': 'Delete',
   'action.archive': 'Archive',
@@ -152,7 +174,7 @@ export const en = {
   'empty.in_progress': 'Start a todo to follow its progress here.',
   'empty.blocked': 'There are no questions waiting for your reply.',
   'empty.in_review': 'Results submitted by an Agent will appear here for your review.',
-  'empty.completed': 'Todos you approve will be kept here.',
+  'empty.completed': 'Completed todos will be kept here.',
   'empty.cancelled': 'Cancelled todos will be kept here.',
   'empty.archived': 'Archived todos will appear here. You can restore them anytime.',
   'empty.create': 'Create a todo',

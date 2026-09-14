@@ -20,6 +20,7 @@ export declare const zh: {
     'action.openConversation': string;
     'action.reply': string;
     'action.approve': string;
+    'action.complete': string;
     'action.requestChanges': string;
     'action.delete': string;
     'action.archive': string;
@@ -108,6 +109,21 @@ export declare const zh: {
     'delete.title': string;
     'delete.description': string;
     'delete.close': string;
+    'data.menu': "数据";
+    'data.export': "导出 JSON";
+    'data.import': "导入 JSON";
+    'data.file': "选择 JSON 备份";
+    'data.confirmTitle': "确认导入备份";
+    'data.confirm': "确认导入";
+    'data.close': "关闭导入确认";
+    'data.preview': "文件：{filename}；共 {count} 项待办，其中 {running} 项正在执行。";
+    'data.warning': "已有待办 ID 将整项跳过，不覆盖本地数据。新增的执行中待办将转为待处理，须手动开始执行。";
+    'data.sessions': "备份不包含会话正文、附件或配置。原 DSH 会话不存在时，待回复、审核修改和历史对话跳转无法通过此次导入恢复。";
+    'data.busy': "正在处理备份…";
+    'data.exported': "备份已生成并请求下载。";
+    'data.imported': "导入完成：新增 {imported} 项，跳过 {skipped} 项，其中 {resetToPending} 项已转为待处理。";
+    'data.error': "备份操作失败：{message}";
+    'data.tooLarge': "备份 JSON 超过 20 MiB 限制，请缩小数据量后重试。";
 };
 export type PersonalTodoKey = keyof typeof zh;
 export declare const en: {
@@ -131,6 +147,7 @@ export declare const en: {
     'action.openConversation': string;
     'action.reply': string;
     'action.approve': string;
+    'action.complete': string;
     'action.requestChanges': string;
     'action.delete': string;
     'action.archive': string;
@@ -219,5 +236,20 @@ export declare const en: {
     'delete.title': string;
     'delete.description': string;
     'delete.close': string;
+    'data.menu': "数据";
+    'data.export': "导出 JSON";
+    'data.import': "导入 JSON";
+    'data.file': "选择 JSON 备份";
+    'data.confirmTitle': "确认导入备份";
+    'data.confirm': "确认导入";
+    'data.close': "关闭导入确认";
+    'data.preview': "文件：{filename}；共 {count} 项待办，其中 {running} 项正在执行。";
+    'data.warning': "已有待办 ID 将整项跳过，不覆盖本地数据。新增的执行中待办将转为待处理，须手动开始执行。";
+    'data.sessions': "备份不包含会话正文、附件或配置。原 DSH 会话不存在时，待回复、审核修改和历史对话跳转无法通过此次导入恢复。";
+    'data.busy': "正在处理备份…";
+    'data.exported': "备份已生成并请求下载。";
+    'data.imported': "导入完成：新增 {imported} 项，跳过 {skipped} 项，其中 {resetToPending} 项已转为待处理。";
+    'data.error': "备份操作失败：{message}";
+    'data.tooLarge': "备份 JSON 超过 20 MiB 限制，请缩小数据量后重试。";
 };
 export declare const NS = "personalTodo";

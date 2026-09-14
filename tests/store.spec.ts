@@ -1,4 +1,4 @@
-import { mkdtempSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { PERSONAL_TODO_SCHEMA_VERSION, PersonalTodoError, TodoStore } from '../src/host/store.ts'
 
 const openStores: TodoStore[] = []
+const completionDirectories: string[] = []
 const CONFIG = {
   databasePath: ':memory:',
   journalMode: 'wal',
@@ -38,6 +39,7 @@ function store(options: {
 
 afterEach(() => {
   for (const instance of openStores.splice(0)) instance.close()
+  for (const directory of completionDirectories.splice(0)) rmSync(directory, { recursive: true, force: true })
 })
 
 describe('TodoStore', () => {
@@ -220,10 +222,64 @@ describe('TodoStore', () => {
     expect(todos.recoverableTodos().map(todo => todo.id)).toEqual(['running'])
   })
 
+  it.each(['pending', 'in_progress', 'blocked', 'in_review'] as const)('从 %s 直接完成并持久化，保留归档和执行历史', (status) => {
+    const directory = mkdtempSync(join(tmpdir(), 'todo-complete-'))
+    completionDirectories.push(directory)
+    const databasePath = join(directory, 'todos.sqlite')
+    const todos = store({ databasePath })
+    const created = todos.create({ title: '直接完成' })
+    if (status !== 'pending') todos.beginRun(created.id, 'run-1', 'session-1')
+    if (status === 'blocked') todos.block({ id: created.id, question: '请选择' }, 'session-1')
+    if (status === 'in_review') todos.submitReview({ id: created.id, summary: '已验证' }, 'session-1')
+    const before = todos.archive(created.id)
+    const completed = todos.approve(created.id)
+    expect(completed).toMatchObject({
+      status: 'completed', completedAt: expect.any(String), blockedReason: null, activeRunId: null,
+      archivedAt: before.archivedAt, reviewRound: before.reviewRound, revision: before.revision + 1,
+      primarySessionId: before.primarySessionId,
+    })
+    expect(todos.recoverableTodos()).toEqual([])
+    const detail = todos.detail(created.id)
+    expect(detail.events[0]).toMatchObject({
+      type: status === 'in_review' ? 'review_approved' : 'updated',
+      message: status === 'in_review' ? null : '用户标记完成',
+    })
+    if (status === 'pending') expect(detail.runs).toEqual([])
+    else expect(detail.runs[0]).toMatchObject({ status: status === 'in_review' ? 'submitted' : 'cancelled', finishedAt: expect.any(String) })
+    expect(() => todos.approve(created.id)).toThrow('cannot be completed while completed')
+    expect(() => todos.progress(created.id, 'session-1', '迟到的进度')).toThrow('must be in_progress')
+    expect(() => todos.block({ id: created.id, question: '迟到的问题' }, 'session-1')).toThrow('must be in_progress')
+    expect(() => todos.submitReview({ id: created.id, summary: '迟到的结果' }, 'session-1')).toThrow('must be in_progress')
+    expect(todos.detail(created.id)).toEqual(detail)
+    todos.close()
+    const reopened = new TodoStore({ ...CONFIG, databasePath })
+    openStores.push(reopened)
+    expect(reopened.detail(created.id)).toEqual(detail)
+    reopened.restore(created.id)
+    expect(reopened.list({ statuses: ['completed'] }).todos).toHaveLength(1)
+  })
+
+  it('拒绝持久化的 cancelled 状态且不写入完成活动', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'todo-complete-'))
+    completionDirectories.push(directory)
+    const databasePath = join(directory, 'todos.sqlite')
+    const todos = store({ databasePath })
+    const created = todos.create({ title: '已取消' })
+    const database = new DatabaseSync(databasePath)
+    try {
+      database.prepare("UPDATE todos SET status = 'cancelled' WHERE id = ?").run(created.id)
+    } finally {
+      database.close()
+    }
+    const before = todos.detail(created.id)
+    expect(() => todos.approve(created.id)).toThrow('cannot be completed while cancelled')
+    expect(todos.detail(created.id)).toEqual(before)
+  })
+
   it('rejects invalid lifecycle transitions and Agent Sessions that do not own the todo', () => {
     const todos = store()
     const created = todos.create({ title: 'Owned task' })
-    expect(() => todos.approve(created.id)).toThrow('must be in_review')
+    expect(() => todos.requestChanges({ id: created.id, feedback: '调整' }, 'run-2')).toThrow('must be in_review')
     todos.beginRun(created.id, 'run-1', 'session-1')
     expect(() => todos.delete(created.id)).toThrow('cannot be deleted while in_progress')
     expect(() => todos.progress(created.id, 'other-session', 'spoofed')).toThrow('does not own')

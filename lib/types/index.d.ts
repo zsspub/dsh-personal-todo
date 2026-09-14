@@ -4,7 +4,7 @@ import z from '@deepseek-ai/schemastery';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { type TodoSessionController } from './host/orchestrator.ts';
 import { type JournalMode } from './host/store.ts';
-import type { BlockTodoRequest, CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, ReportTodoProgressRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest } from './types.ts';
+import type { BlockTodoRequest, CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, ReportTodoProgressRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult } from './types.ts';
 export type * from './types.ts';
 export { PERSONAL_TODO_SCHEMA_VERSION, PersonalTodoError, TodoStore } from './host/store.ts';
 export type { JournalMode, TodoStoreConfig } from './host/store.ts';
@@ -43,6 +43,8 @@ export declare class PersonalTodoService extends TypertRemoteService {
     constructor(ctx: Context, config: Config);
     /** 查询一页待办；在开始同步 SQLite 操作前检查取消信号。 */
     list(request: ListTodoInput, signal: AbortSignal): Promise<TodoListResult>;
+    exportData(_request: ExportTodoDataRequest, signal: AbortSignal): Promise<ExportTodoDataResult>;
+    importData(request: ImportTodoDataRequest, signal: AbortSignal): Promise<ImportTodoDataResult>;
     /** 创建并持久化一条待办。 */
     create(request: CreateTodoInput, signal: AbortSignal): Promise<Todo>;
     /** 读取待办及其执行轮次、关联会话和活动记录。 */
@@ -53,7 +55,7 @@ export declare class PersonalTodoService extends TypertRemoteService {
     start(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
     /** 使用用户回复继续执行被阻塞的待办。 */
     reply(request: ReplyTodoRequest, signal: AbortSignal): Promise<Todo>;
-    /** 批准 Agent 最近一次提交，并将待办标记为完成。 */
+    /** 用户完成待处理、执行中、阻塞或待审核的待办；保留历史，不中断 Agent。 */
     approve(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
     /** 归档待办，不改变其生命周期状态。 */
     archive(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;

@@ -1,5 +1,5 @@
 /** 负责个人待办校验、排序和持久化写入的 SQLite 存储层。 */
-import type { BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoListResult, TodoSession, UpdateTodoPatch } from '../types.ts';
+import type { BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ExportTodoDataResult, ImportTodoDataResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoListResult, TodoSession, UpdateTodoPatch } from '../types.ts';
 export declare const PERSONAL_TODO_SCHEMA_VERSION = 5;
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist';
 export interface TodoStoreConfig {
@@ -49,6 +49,9 @@ export declare class TodoStore {
     get(id: string): Todo;
     /** 返回待办及其持久化执行历史。 */
     detail(id: string): TodoDetail;
+    private readDetail;
+    exportData(): ExportTodoDataResult;
+    importData(json: string): ImportTodoDataResult;
     /** 规范化并持久化一条待处理待办，返回保存结果。 */
     create(input: CreateTodoInput): Todo;
     /** 替换指定的可编辑字段，返回持久化后的待办。 */
@@ -69,7 +72,7 @@ export declare class TodoStore {
     reply(request: ReplyTodoRequest): Todo;
     /** 提交 Agent 结果，等待用户明确审核。 */
     submitReview(request: SubmitTodoReviewRequest, sessionId: string): Todo;
-    /** 批准 Agent 最近一次提交，并将待办标记为完成。 */
+    /** 用户完成待处理、执行中、阻塞或待审核的待办；保留历史，不中断 Agent。 */
     approve(id: string): Todo;
     /** 在原主会话中创建新一轮执行，处理用户修改意见。 */
     requestChanges(request: RequestTodoChangesRequest, runId: string): Todo;

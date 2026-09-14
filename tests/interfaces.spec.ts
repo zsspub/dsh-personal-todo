@@ -127,6 +127,8 @@ describe('Host Remote service and Agent tools', () => {
       'personal_todo_block',
       'personal_todo_submit_review',
       'personal_todo_delete',
+      'personal_todo_export',
+      'personal_todo_import',
     ])
     expect(tools.get('personal_todo_add')?.parameters).toMatchObject({
       type: 'object',
@@ -141,6 +143,35 @@ describe('Host Remote service and Agent tools', () => {
     expect(tools.get('personal_todo_list')?.parameters).toMatchObject({
       type: 'object',
       properties: { archived: { type: 'boolean' } },
+    })
+  })
+
+  it.each([undefined, 'none', 'low', 'medium', 'high'] as const)('Agent 创建待办时优先级 %s 的保存和查询结果', async priority => {
+    const { ctx, tools } = await setup()
+    const added = await tools.get('personal_todo_add')?.execute({
+      title: '优先级验证',
+      ...(priority === undefined ? {} : { priority }),
+    }, run()) as Awaited<ReturnType<typeof ctx.personalTodo.create>>
+    expect(added.priority).toBe(priority ?? 'medium')
+    expect(await tools.get('personal_todo_list')?.execute({}, run())).toMatchObject({
+      todos: [{ id: added.id, priority: priority ?? 'medium' }],
+    })
+    await tools.get('personal_todo_update')?.execute({ id: added.id, title: '更新标题' }, run())
+    expect((await ctx.personalTodo.get({ id: added.id }, signal)).todo.priority).toBe(priority ?? 'medium')
+  })
+
+  it.each(['pending', 'in_progress', 'blocked'] as const)('现有 approve API 从 %s 完成待办，工具可查询最终状态', async (status) => {
+    const { ctx, tools } = await setup()
+    const todo = await ctx.personalTodo.create({ title: '直接完成' }, signal)
+    if (status !== 'pending') {
+      const started = await ctx.personalTodo.start({ id: todo.id }, signal)
+      if (status === 'blocked') await ctx.personalTodo.block({ id: todo.id, question: '请选择' }, started.primarySessionId as string)
+    }
+    expect(await ctx.personalTodo.approve({ id: todo.id }, signal)).toMatchObject({
+      status: 'completed', completedAt: expect.any(String), activeRunId: null, blockedReason: null, reviewRound: 0,
+    })
+    expect(await tools.get('personal_todo_list')?.execute({ statuses: ['completed'] }, run())).toMatchObject({
+      total: 1, todos: [{ id: todo.id, status: 'completed' }],
     })
   })
 
@@ -287,6 +318,38 @@ describe('Host Remote service and Agent tools', () => {
     expect((await ctx.personalTodo.get({ id: todo.id }, signal)).runs).toHaveLength(2)
   })
 
+  it('面板接口与 Agent 工具共用备份规则，导入不派发会话且重启不自动恢复', async () => {
+    const source = await setup()
+    const todo = await source.ctx.personalTodo.create({ title: '备份任务' }, signal)
+    await source.ctx.personalTodo.start({ id: todo.id }, signal)
+    const exported = await source.tools.get('personal_todo_export')!.execute({}, run()) as { filename: string; json: string }
+    const remoteExport = await source.ctx.personalTodo.exportData({}, signal)
+    expect(JSON.parse(exported.json).todos).toEqual(JSON.parse(remoteExport.json).todos)
+    expect(exported.filename).toMatch(/^personal-todo-.*\.json$/u)
+    const directory = mkdtempSync(join(tmpdir(), 'todo-import-service-'))
+    temporaryDirectories.push(directory)
+    const path = join(directory, 'todos.sqlite3')
+    const target = await setup(path)
+    expect(await target.tools.get('personal_todo_import')!.execute({ json: exported.json }, run()))
+      .toEqual({ imported: 1, skipped: 0, resetToPending: 1 })
+    expect(await target.ctx.personalTodo.importData({ json: exported.json }, signal))
+      .toEqual({ imported: 0, skipped: 1, resetToPending: 0 })
+    expect((await target.ctx.personalTodo.get({ id: todo.id }, signal)).todo.status).toBe('pending')
+    expect(target.sessions.created).toEqual([])
+    expect(target.sessions.messages).toEqual([])
+    expect(target.sessions.resolved).toEqual([])
+    const output = target.tools.get('personal_todo_import')!.output
+    expect(output.schema).toMatchObject({
+      properties: { imported: { type: 'integer' }, skipped: { type: 'integer' }, resetToPending: { type: 'integer' } },
+    })
+    expect(output.render({}, { imported: 1, skipped: 0, resetToPending: 1 })[0]?.text).toContain('"imported":1')
+    await target.ctx.fiber.dispose()
+    const reopened = await setup(path)
+    expect(reopened.sessions.created).toEqual([])
+    expect(reopened.sessions.messages).toEqual([])
+    expect(reopened.sessions.resolved).toEqual([])
+  })
+
   it('validates tool inputs, Agent ownership, and cancellation', async () => {
     const { ctx, tools } = await setup()
     await expect(tools.get('personal_todo_add')?.execute({}, run())).rejects.toThrow('title')
@@ -297,5 +360,11 @@ describe('Host Remote service and Agent tools', () => {
     const controller = new AbortController()
     controller.abort(new Error('stop'))
     expect(() => ctx.personalTodo.list({}, controller.signal)).toThrow('stop')
+    expect(() => ctx.personalTodo.exportData({}, controller.signal)).toThrow('stop')
+    expect(() => ctx.personalTodo.importData({ json: '{}' }, controller.signal)).toThrow('stop')
+    await expect(tools.get('personal_todo_import')?.execute({}, run())).rejects.toThrow('json')
+    await expect(tools.get('personal_todo_import')?.execute({ json: '{' }, run())).rejects.toThrow('JSON')
+    await expect(tools.get('personal_todo_export')?.execute({}, { ...run(), signal: controller.signal })).rejects.toThrow('stop')
+    await expect(tools.get('personal_todo_import')?.execute({ json: '{}' }, { ...run(), signal: controller.signal })).rejects.toThrow('stop')
   })
 })

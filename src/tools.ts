@@ -37,7 +37,7 @@ const CREATE_PARAMETERS = {
   title: { type: 'string', required: true, description: 'Short task title.' },
   notes: { ...NULLABLE_STRING, description: 'Optional notes; null clears the value.' },
   assignee: { ...NULLABLE_STRING, description: 'Optional person responsible for the todo.' },
-  priority: { type: 'string', enum: [...TODO_PRIORITIES], description: 'Task priority; defaults to none.' },
+  priority: { type: 'string', enum: [...TODO_PRIORITIES], description: '待办优先级；用户未声明时使用 medium（中优先级）。' },
   dueAt: { ...NULLABLE_STRING, description: 'Optional RFC 3339 deadline.' },
   tags: { type: 'array', items: { type: 'string' }, description: 'Up to 20 tags.' },
 } as const
@@ -57,7 +57,7 @@ export function apply(ctx: Context): void {
       schema: TODO_SCHEMA,
       render: (_args, todo) => [{ type: 'text', text: JSON.stringify(todo) }],
     },
-    execute: (args, exec) => ctx.personalTodo.create(args, exec.signal),
+    execute: (args, exec) => ctx.personalTodo.create({ ...args, priority: args.priority ?? 'medium' }, exec.signal),
     presentCall: args => ({ card: 'generic', title: `Create todo: ${args.title}`, kind: 'other', rawInput: args }),
   }))
 
@@ -207,5 +207,46 @@ export function apply(ctx: Context): void {
     },
     execute: (args, exec) => ctx.personalTodo.delete(args, exec.signal),
     presentCall: args => ({ card: 'generic', title: `Delete todo ${args.id}`, kind: 'other', rawInput: args }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'personal_todo_export',
+    description: '完整导出全部待办及历史为 JSON，不包含会话正文、附件或配置。需要保存文件时请使用宿主文件工具。',
+    parameters: {},
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          filename: { type: 'string', required: true },
+          json: { type: 'string', required: true },
+        },
+      },
+      render: (_args, result) => [{ type: 'text', text: JSON.stringify(result) }],
+    },
+    execute: (_args, exec) => ctx.personalTodo.exportData({}, exec.signal),
+    presentCall: args => ({ card: 'generic', title: '导出个人待办备份', kind: 'other', rawInput: args }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'personal_todo_import',
+    description: '导入版本 1 的个人待办 JSON 备份，跳过已有待办 ID；新增执行中待办转为待处理，不派发 Agent。会话关联不是会话备份。仅在用户要求导入时调用，需要读取文件时请使用宿主文件工具。最多 20 MiB。',
+    parameters: {
+      json: { type: 'string', required: true, description: '完整的 dsh-personal-todo JSON 备份内容，不是文件路径。' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          imported: { type: 'integer', required: true },
+          skipped: { type: 'integer', required: true },
+          resetToPending: { type: 'integer', required: true },
+        },
+      },
+      render: (_args, result) => [{ type: 'text', text: JSON.stringify(result) }],
+    },
+    execute: (args, exec) => ctx.personalTodo.importData(args, exec.signal),
+    presentCall: () => ({ card: 'generic', title: '导入个人待办备份', kind: 'other' }),
   }))
 }

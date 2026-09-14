@@ -3,7 +3,7 @@ import type {
   RemoteResult,
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest } from 'dsh-personal-todo/types'
+import type { CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest } from 'dsh-personal-todo/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$706572736f6e616c546f646f {
@@ -11,7 +11,9 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     archive: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     create: (request: CreateTodoInput, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     delete: (request: DeleteTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<DeleteTodoResult>>
+    exportData: (_request: ExportTodoDataRequest, signal?: AbortSignal) => Promise<RemoteResult<ExportTodoDataResult>>
     get: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<TodoDetail>>
+    importData: (request: ImportTodoDataRequest, signal?: AbortSignal) => Promise<RemoteResult<ImportTodoDataResult>>
     list: (request: ListTodoInput, signal?: AbortSignal) => Promise<RemoteResult<TodoListResult>>
     reply: (request: ReplyTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     requestChanges: (request: RequestTodoChangesRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
@@ -24,7 +26,9 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'personalTodo/archive': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     'personalTodo/create': (request: CreateTodoInput, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     'personalTodo/delete': (request: DeleteTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<DeleteTodoResult>>
+    'personalTodo/exportData': (_request: ExportTodoDataRequest, signal?: AbortSignal) => Promise<RemoteResult<ExportTodoDataResult>>
     'personalTodo/get': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<TodoDetail>>
+    'personalTodo/importData': (request: ImportTodoDataRequest, signal?: AbortSignal) => Promise<RemoteResult<ImportTodoDataResult>>
     'personalTodo/list': (request: ListTodoInput, signal?: AbortSignal) => Promise<RemoteResult<TodoListResult>>
     'personalTodo/reply': (request: ReplyTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
     'personalTodo/requestChanges': (request: RequestTodoChangesRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>

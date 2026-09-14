@@ -4,11 +4,12 @@ import { randomUUID } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, isAbsolute } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { assertBackupSize, parseTodoBackup } from '../backup.ts'
 import type {
-  BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest,
+  BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ExportTodoDataResult, ImportTodoDataResult, ListTodoInput, ReplyTodoRequest,
   RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoCounts, TodoDetail,
   TodoEvent, TodoEventType, TodoListResult, TodoPriority, TodoRun, TodoRunStatus,
-  TodoSession, TodoStatus, UpdateTodoPatch,
+  TodoBackup, TodoSession, TodoStatus, UpdateTodoPatch,
 } from '../types.ts'
 import { TODO_PRIORITIES, TODO_STATUSES } from '../types.ts'
 
@@ -566,6 +567,10 @@ export class TodoStore {
 
   /** 返回待办及其持久化执行历史。 */
   detail(id: string): TodoDetail {
+    return this.readDetail(id, false)
+  }
+
+  private readDetail(id: string, fullHistory: boolean): TodoDetail {
     this.assertOpen()
     const todo = this.todoFromRow(this.requireRow(id))
     const runs = this.database.prepare(`
@@ -579,13 +584,108 @@ export class TodoStore {
     `).all(id) as unknown as TodoSessionRow[]
     const events = this.database.prepare(`
       SELECT id, todo_id, run_id, type, message, created_at
-      FROM todo_events WHERE todo_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 200
+      FROM todo_events WHERE todo_id = ? ORDER BY created_at DESC, rowid DESC ${fullHistory ? '' : 'LIMIT 200'}
     `).all(id) as unknown as TodoEventRow[]
     return {
       todo,
       runs: runs.map(row => this.runFromRow(row)),
       sessions: sessions.map(row => this.sessionFromRow(row)),
       events: events.map(row => this.eventFromRow(row)),
+    }
+  }
+
+  exportData(): ExportTodoDataResult {
+    this.assertOpen()
+    const backup = this.transaction((): TodoBackup => {
+      const rows = this.database.prepare('SELECT id FROM todos ORDER BY created_at, id').all() as { id: string }[]
+      return {
+        format: 'dsh-personal-todo',
+        version: 1,
+        exportedAt: new Date(this.now()).toISOString(),
+        todos: rows.map(row => this.readDetail(row.id, true)),
+      }
+    })
+    const json = JSON.stringify(backup, null, 2)
+    try {
+      assertBackupSize(json)
+    } catch (error) {
+      throw new PersonalTodoError((error as Error).message)
+    }
+    return { filename: `personal-todo-${backup.exportedAt.replace(/[:.]/gu, '-')}.json`, json }
+  }
+
+  importData(json: string): ImportTodoDataResult {
+    this.assertOpen()
+    try {
+      const backup = parseTodoBackup(json)
+      return this.transaction(() => {
+        let imported = 0
+        let skipped = 0
+        let resetToPending = 0
+        for (const detail of backup.todos) {
+          const { todo, runs, sessions, events } = detail
+          if (this.find(todo.id) !== undefined) {
+            skipped++
+            continue
+          }
+          for (const [table, column, ids] of [
+            ['todo_runs', 'id', runs.map(run => run.id)],
+            ['todo_events', 'id', events.map(event => event.id)],
+            ['todo_sessions', 'session_id', sessions.map(session => session.sessionId)],
+          ] as const) {
+            const lookup = this.database.prepare(`SELECT todo_id FROM ${table} WHERE ${column} = ?`)
+            for (const id of ids) {
+              if (lookup.get(id) !== undefined) {
+                throw new PersonalTodoError(`导入冲突：${table} 标识 ${id} 已属于其他本地待办。`)
+              }
+            }
+          }
+          const reset = todo.status === 'in_progress'
+          const timestamp = this.now()
+          const time = (value: string | null): number | null => value === null ? null : Date.parse(value)
+          this.database.prepare(`
+            INSERT INTO todos (
+              id, title, notes, assignee, status, priority, due_at, primary_session_id, active_run_id,
+              latest_summary, blocked_reason, review_round, revision, created_at, updated_at, completed_at, archived_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(todo.id, todo.title, todo.notes, todo.assignee, reset ? 'pending' : todo.status,
+            todo.priority, time(todo.dueAt), todo.primarySessionId, reset ? null : todo.activeRunId,
+            todo.latestSummary, reset ? null : todo.blockedReason, todo.reviewRound, todo.revision + (reset ? 1 : 0),
+            time(todo.createdAt), reset ? timestamp : time(todo.updatedAt), time(todo.completedAt), time(todo.archivedAt))
+          const insertTag = this.database.prepare('INSERT INTO todo_tags (todo_id, tag) VALUES (?, ?)')
+          for (const tag of todo.tags) insertTag.run(todo.id, tag)
+          const insertRun = this.database.prepare(`
+            INSERT INTO todo_runs (id, todo_id, sequence, status, root_session_id, result_summary, verification, risk, started_at, finished_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `)
+          for (const run of runs) {
+            const cancel = reset && run.id === todo.activeRunId
+            insertRun.run(run.id, todo.id, run.sequence, cancel ? 'cancelled' : run.status, run.rootSessionId,
+              run.resultSummary, run.verification, run.risk, time(run.startedAt), cancel ? timestamp : time(run.finishedAt))
+          }
+          const insertSession = this.database.prepare(`
+            INSERT INTO todo_sessions (todo_id, session_id, role, parent_session_id, created_at) VALUES (?, ?, ?, ?, ?)
+          `)
+          for (const session of sessions) {
+            insertSession.run(todo.id, session.sessionId, session.role, session.parentSessionId, time(session.createdAt))
+          }
+          const insertEvent = this.database.prepare(`
+            INSERT INTO todo_events (id, todo_id, run_id, type, message, created_at) VALUES (?, ?, ?, ?, ?, ?)
+          `)
+          for (const event of [...events].reverse()) {
+            insertEvent.run(event.id, todo.id, event.runId, event.type, event.message, time(event.createdAt))
+          }
+          if (reset) {
+            this.appendEvent(todo.id, todo.activeRunId, 'updated', '从备份导入：执行中待办已转为待处理，请手动开始执行。', timestamp)
+            resetToPending++
+          }
+          imported++
+        }
+        return { imported, skipped, resetToPending }
+      })
+    } catch (error) {
+      if (error instanceof PersonalTodoError) throw error
+      throw new PersonalTodoError(`导入失败，未写入任何数据：${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -836,18 +936,25 @@ export class TodoStore {
     return this.get(request.id)
   }
 
-  /** 批准 Agent 最近一次提交，并将待办标记为完成。 */
+  /** 用户完成待处理、执行中、阻塞或待审核的待办；保留历史，不中断 Agent。 */
   approve(id: string): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
-    this.requireStatus(current, 'in_review')
+    if (current.status === 'completed' || current.status === 'cancelled') {
+      throw new PersonalTodoError(`todo ${JSON.stringify(id)} cannot be completed while ${current.status}`)
+    }
     const timestamp = this.now()
     this.transaction(() => {
       this.database.prepare(`
-        UPDATE todos SET status = 'completed', active_run_id = NULL, completed_at = ?,
+        UPDATE todos SET status = 'completed', active_run_id = NULL, blocked_reason = NULL, completed_at = ?,
           revision = revision + 1, updated_at = ? WHERE id = ?
       `).run(timestamp, timestamp, id)
-      this.appendEvent(id, current.active_run_id, 'review_approved', null, timestamp)
+      this.database.prepare(`
+        UPDATE todo_runs SET status = 'cancelled', finished_at = ?
+        WHERE id = ? AND status IN ('running', 'waiting_input')
+      `).run(timestamp, current.active_run_id)
+      this.appendEvent(id, current.active_run_id, current.status === 'in_review' ? 'review_approved' : 'updated',
+        current.status === 'in_review' ? null : '用户标记完成', timestamp)
     })
     return this.get(id)
   }

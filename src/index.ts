@@ -9,6 +9,7 @@ import type {
   BlockTodoRequest, CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput,
   ReplyTodoRequest, ReportTodoProgressRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest,
   Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest,
+  ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -113,6 +114,18 @@ export class PersonalTodoService extends TypertRemoteService {
     return Promise.resolve(this.store.list(request))
   }
 
+  @Remote
+  exportData(_request: ExportTodoDataRequest, signal: AbortSignal): Promise<ExportTodoDataResult> {
+    signal.throwIfAborted()
+    return Promise.resolve(this.store.exportData())
+  }
+
+  @Remote
+  importData(request: ImportTodoDataRequest, signal: AbortSignal): Promise<ImportTodoDataResult> {
+    signal.throwIfAborted()
+    return Promise.resolve(this.store.importData(request.json))
+  }
+
   /** 创建并持久化一条待办。 */
   @Remote
   create(request: CreateTodoInput, signal: AbortSignal): Promise<Todo> {
@@ -148,7 +161,7 @@ export class PersonalTodoService extends TypertRemoteService {
     return this.orchestrator.reply(request)
   }
 
-  /** 批准 Agent 最近一次提交，并将待办标记为完成。 */
+  /** 用户完成待处理、执行中、阻塞或待审核的待办；保留历史，不中断 Agent。 */
   @Remote
   approve(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()

@@ -150,3 +150,22 @@ export interface DeleteTodoResult {
     readonly id: string;
     readonly deleted: true;
 }
+export interface TodoBackup {
+    readonly format: 'dsh-personal-todo';
+    readonly version: 1;
+    readonly exportedAt: string;
+    readonly todos: TodoDetail[];
+}
+export type ExportTodoDataRequest = Record<string, never>;
+export interface ExportTodoDataResult {
+    readonly filename: string;
+    readonly json: string;
+}
+export interface ImportTodoDataRequest {
+    readonly json: string;
+}
+export interface ImportTodoDataResult {
+    readonly imported: number;
+    readonly skipped: number;
+    readonly resetToPending: number;
+}

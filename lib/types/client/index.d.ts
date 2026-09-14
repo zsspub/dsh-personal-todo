@@ -9,13 +9,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         /** 个人待办面板的控件和状态文案。 */
         personalTodo: PersonalTodoKey;
     }
-    interface SlotMap {
-        /** 承载个人待办悬浮抽屉的根级图层。 */
-        'shell.overlay': {
-            kind: 'list';
-            scope: 'root';
-        };
-    }
 }
 export declare const inject: string[];
 /** 挂载生成的 Remote 命名空间，并注册侧栏入口和待办面板。 */

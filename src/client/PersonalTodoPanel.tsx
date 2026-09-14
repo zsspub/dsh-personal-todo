@@ -5,13 +5,16 @@ import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots
 import {
   Button, MarkdownText, Menu, Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { Archive, ArrowDown, ArrowLeft, CalendarDays, ChevronRight, ChevronsUp, CircleCheck, CircleDashed, CircleDot, CircleX, ClipboardCheck, ClipboardList, Copy, Ellipsis, Equal, Flag, GitBranch, ListTodo, LoaderCircle, MessageCircle, MessageSquare, Pencil, Play, Plus, Tag, Trash2, Undo2, UserRound, X } from 'lucide-react'
+import { Archive, ArrowDown, ArrowLeft, CalendarDays, ChevronRight, ChevronsUp, CircleCheck, CircleDashed, CircleDot, CircleX, ClipboardCheck, ClipboardList, Copy, Ellipsis, Equal, Flag, GitBranch, ListTodo, LoaderCircle, MessageCircle, MessageSquare, Pencil, Play, Plus, Tag, Trash2, Undo2, UserRound } from 'lucide-react'
 import type {
   CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest,
   RequestTodoChangesRequest, Todo, TodoDetail, TodoEventType, TodoListResult,
   TodoPriority, TodoSession, TodoStatus, UpdateTodoRequest,
 } from '../types.ts'
 import { TODO_STATUSES } from '../types.ts'
+import type { ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult } from '../types.ts'
+import { parseTodoBackup, TODO_BACKUP_MAX_BYTES } from '../backup.ts'
+import { Database, Download, Upload } from 'lucide-react'
 import type { PersonalTodoCanvasController } from './canvas.ts'
 import type { NS } from './locales.ts'
 
@@ -22,8 +25,9 @@ const CSS = `
 .dsh-personal-todo-trigger-row{flex:none;display:flex;align-items:center;gap:8px;width:calc(100% + 4px);margin:0 -2px}
 .dsh-personal-todo-trigger-row[data-wide=false]{width:36px;margin:0}
 .dsh-personal-todo-trigger{position:relative;flex:1;min-width:0;display:flex;align-items:center;gap:8px;width:auto;height:42px;margin:0;padding:0 10px 0 8px;box-sizing:border-box;border:0;border-radius:12px;background:transparent;cursor:pointer;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;font-weight:400;line-height:22px;text-align:left}
-.dsh-personal-todo-trigger:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-personal-todo-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-personal-todo-trigger:focus-visible{outline:2px solid var(--dsw-alias-brand-primary-new-colorprimary-new-color);outline-offset:2px}
+.dsh-personal-todo-trigger:disabled{cursor:default;opacity:.45}
 .dsh-personal-todo-trigger>svg{flex:none}
 .dsh-personal-todo-trigger-label{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .dsh-personal-todo-trigger[data-wide=false]{flex:none;width:36px;height:36px;justify-content:center;gap:0;padding:0;border-radius:50%;corner-shape:round}
@@ -32,12 +36,13 @@ const CSS = `
 [data-slot='sidebar.footer.action']:has(.dsh-personal-todo-trigger[data-wide=true]){display:flex!important;flex:1;flex-direction:column;min-width:0;width:100%}
 [data-slot='sidebar.footer.action']:has(.dsh-personal-todo-trigger[data-wide=false]){display:flex!important;flex-direction:column;align-items:center}
 .dsh-personal-todo-trigger[data-wide=true]{justify-content:flex-start;width:100%}
-.dsh-personal-todo-canvas{position:absolute;top:8px;right:8px;bottom:8px;z-index:1;display:flex;box-sizing:border-box;width:440px;max-width:calc(100% - 16px);min-width:0;flex-direction:column;overflow:hidden;pointer-events:auto;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l2);border-radius:16px;box-shadow:var(--dsw-shadow-lv3,0 12px 40px rgb(0 0 0 / 28%))}
-.dsh-personal-todo-canvas-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:16px 20px 14px;border-bottom:1px solid var(--dsw-alias-border-l2)}
+.dsh-personal-todo-canvas{display:flex;box-sizing:border-box;width:100%;height:100%;min-width:0;min-height:0;flex-direction:column;overflow:hidden;background:var(--dsw-alias-bg-base)}
+.dsh-personal-todo-canvas-header{display:flex;align-items:flex-start;gap:16px;padding:16px 20px 14px;border-bottom:1px solid var(--dsw-alias-border-l2)}
 .dsh-personal-todo-canvas-heading{min-width:0}.dsh-personal-todo-canvas-heading h2{margin:0;color:var(--dsw-alias-label-primary);font-size:16px;line-height:24px;font-weight:500}.dsh-personal-todo-canvas-heading p{margin:2px 0 0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
-.dsh-personal-todo-close{display:grid;flex:none;place-items:center;width:28px;height:28px;margin-right:-8px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}.dsh-personal-todo-close:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-personal-todo-body{--todo-edge-padding:16px;display:flex;flex:1;flex-direction:column;min-height:0;gap:8px;padding:12px 16px 16px}
 .dsh-personal-todo-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.dsh-personal-todo-transfer{overflow-wrap:anywhere;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:20px}
+.dsh-personal-todo-transfer p{margin:12px 0}
 .dsh-personal-todo-new{--dsw-alias-button-primary-fill:var(--dsw-alias-brand-primary-new-colorprimary-new-color);--dsw-alias-button-primary-hover:color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color) 88%,black);--dsw-alias-label-primary-foreground:#fff}
 .dsh-personal-todo-toolbar+.dsh-personal-todo-status-row{margin-top:8px}
 .dsh-personal-todo-status-row{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}
@@ -88,15 +93,16 @@ const CSS = `
 .dsh-personal-todo-form input,.dsh-personal-todo-form select,.dsh-personal-todo-form textarea{width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);border-radius:10px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);padding:10px 12px;font:inherit;font-size:13px;line-height:20px;outline:none}.dsh-personal-todo-form input,.dsh-personal-todo-form select{height:40px}.dsh-personal-todo-form textarea{min-height:112px;resize:vertical}.dsh-personal-todo-form input::placeholder,.dsh-personal-todo-form textarea::placeholder{color:var(--dsw-alias-label-tertiary);opacity:1}.dsh-personal-todo-form input:focus,.dsh-personal-todo-form select:focus,.dsh-personal-todo-form textarea:focus{border-color:var(--dsw-alias-brand-primary-new-colorprimary-new-color);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-brand-primary-new-colorprimary-new-color) 16%,transparent)}
 .dsh-personal-todo-form-actions{display:flex;flex:none;flex-wrap:wrap;justify-content:flex-end;gap:8px;padding:16px 4px 0;border-top:1px solid var(--dsw-alias-border-l2)}.dsh-personal-todo-small-dialog{width:min(480px,calc(100vw - 32px))}
 .dsh-personal-todo-canvas .dsh-personal-todo-badge[data-status]{color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--todo-status-color,var(--dsw-alias-label-secondary)) 16%,var(--dsw-alias-bg-layer-1))}.dsh-personal-todo-badge[data-status=in_progress]{--todo-status-color:var(--dsw-alias-state-business-primary)}.dsh-personal-todo-badge[data-status=blocked]{--todo-status-color:var(--dsw-alias-state-warn-primary)}.dsh-personal-todo-badge[data-status=in_review]{--todo-status-color:#8b5cf6}.dsh-personal-todo-badge[data-status=completed]{--todo-status-color:var(--dsw-alias-state-success-primary)}.dsh-personal-todo-badge[data-status=cancelled]{--todo-status-color:var(--dsw-alias-state-error-primary)}
-@media(max-width:800px){.dsh-personal-todo-canvas{top:4px;right:4px;bottom:4px;max-width:calc(100% - 8px)}.dsh-personal-todo-canvas-header{padding:14px}.dsh-personal-todo-canvas-heading p{display:none}.dsh-personal-todo-body{--todo-edge-padding:10px;padding:10px}.dsh-personal-todo-detail{padding:14px}.dsh-personal-todo-commandbar{padding:10px 14px 12px}}
+@media(max-width:800px){.dsh-personal-todo-canvas-header{padding:14px}.dsh-personal-todo-canvas-heading p{display:none}.dsh-personal-todo-body{--todo-edge-padding:10px;padding:10px}.dsh-personal-todo-detail{padding:14px}.dsh-personal-todo-commandbar{padding:10px 14px 12px}}
 @media(max-width:380px){.dsh-personal-todo-form{grid-template-columns:minmax(0,1fr)}}
 `
 
 export interface PersonalTodoPanelInjected {
   readonly canvas: PersonalTodoCanvasController
   readonly openCanvas: () => void
-  readonly closeCanvas: () => void
   readonly list: (request: ListTodoInput, signal: AbortSignal) => Promise<TodoListResult>
+  readonly exportData: (signal: AbortSignal) => Promise<ExportTodoDataResult>
+  readonly importData: (request: ImportTodoDataRequest, signal: AbortSignal) => Promise<ImportTodoDataResult>
   readonly get: (id: string, signal: AbortSignal) => Promise<TodoDetail>
   readonly create: (request: CreateTodoInput, signal: AbortSignal) => Promise<Todo>
   readonly update: (request: UpdateTodoRequest, signal: AbortSignal) => Promise<Todo>
@@ -114,7 +120,7 @@ export type PersonalTodoTriggerProps =
   PropsRuntime<'sidebar.footer.action'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected
 
 export type PersonalTodoCanvasProps =
-  PropsRuntime<'shell.overlay'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected
+  PropsRuntime<'sidebar.right.pane.tab'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected
 
 type View = TodoStatus | 'archived'
 
@@ -203,16 +209,17 @@ function normalizedAssignee(value: string): string | null {
 }
 
 /** 打开待办面板并提示待处理事项的侧栏入口。 */
-export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, closeCanvas }: PersonalTodoTriggerProps) {
+export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, useSessions }: PersonalTodoTriggerProps) {
   const snapshot = useSyncExternalStore(canvas.subscribe, canvas.getSnapshot)
+  const hasCurrentSession = useSessions(state => state.current !== undefined)
 
   useEffect(() => {
     let controller: AbortController | undefined
     const refresh = (): void => {
       controller?.abort()
       controller = new AbortController()
-      void list({ statuses: ['blocked', 'in_review'], limit: 1 }, controller.signal).then(
-        page => { canvas.setAttentionCount(page.counts.blocked + page.counts.inReview) },
+      void list({ statuses: ['pending', 'blocked', 'in_review'], limit: 1 }, controller.signal).then(
+        page => { canvas.setAttentionCount(page.counts.pending + page.counts.blocked + page.counts.inReview) },
         () => undefined,
       )
     }
@@ -238,8 +245,8 @@ export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, closeCa
           aria-label={triggerLabel}
           title={triggerLabel}
           data-wide={wide}
-          aria-expanded={snapshot.open}
-          onClick={snapshot.open ? closeCanvas : openCanvas}
+          disabled={!hasCurrentSession}
+          onClick={openCanvas}
         >
           <ListTodo size={wide ? 16 : 18} aria-hidden="true" />
           {wide ? <span className="dsh-personal-todo-trigger-label">{t('trigger.label')}</span> : null}
@@ -252,11 +259,11 @@ export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, closeCa
   )
 }
 
-/** 悬浮在 shell.overlay 图层中的个人待办抽屉。 */
+/** 渲染在宿主右侧 Sidebar Tab 中的个人待办面板。 */
 export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const {
     t, canvas, list, get, create, update, start, reply, approve, archive, restore,
-    requestChanges, delete: deleteTodo, openSession, closeCanvas,
+    requestChanges, delete: deleteTodo, openSession, useTabInfo, exportData, importData,
   } = props
   // 同时兼容已发布版的 codeLabels 与新版 Host 的 labels 接口。
   const markdownProps = useMemo(() => {
@@ -264,7 +271,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     return { codeLabels: code, labels: { code, footnotes: t('markdown.footnotes') } }
   }, [t])
   const markdown = (text: string): React.ReactNode => <div className="dsh-personal-todo-markdown"><MarkdownText text={text} {...markdownProps} /></div>
-  const snapshot = useSyncExternalStore(canvas.subscribe, canvas.getSnapshot)
+  const { tab } = useTabInfo()
   const [view, setView] = useState<View>('pending')
   const [todos, setTodos] = useState<Todo[]>([])
   const [result, setResult] = useState<TodoListResult>()
@@ -278,8 +285,15 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const [confirming, setConfirming] = useState<Todo>()
   const [replyText, setReplyText] = useState('')
   const [feedback, setFeedback] = useState('')
+  const [dataOpen, setDataOpen] = useState(false)
+  const [transferBusy, setTransferBusy] = useState(false)
+  const [transferError, setTransferError] = useState<string>()
+  const [transferResult, setTransferResult] = useState<string>()
+  const [importPreview, setImportPreview] = useState<{ filename: string; json: string; count: number; running: number }>()
+  const fileInput = useRef<HTMLInputElement>(null)
+  const transferLock = useRef(false)
+  const mounted = useRef(true)
   const controllers = useRef(new Set<AbortController>())
-  const insidePointer = useRef<Event>()
   selectedIdRef.current = selectedId
 
   const withController = async <T,>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> => {
@@ -317,7 +331,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
         setSelectedId(undefined)
         setDetail(undefined)
       }
-      canvas.setAttentionCount(page.counts.blocked + page.counts.inReview)
+      canvas.setAttentionCount(page.counts.pending + page.counts.blocked + page.counts.inReview)
       return page
     } catch (reason) {
       setError(errorText(reason))
@@ -335,50 +349,86 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   }, [fetchDetail, fetchPage, selectedId])
 
   useEffect(() => {
-    if (snapshot.open) void fetchPage(0)
-  }, [fetchPage, snapshot.open])
+    if (tab.visible) void fetchPage(0)
+  }, [fetchPage, tab.visible])
 
   useEffect(() => {
-    if (!snapshot.open || !todos.some(todo => todo.status === 'in_progress')) return
+    if (!tab.visible) return
     const interval = window.setInterval(() => { void refresh(true) }, ACTIVE_REFRESH_MS)
     return () => { window.clearInterval(interval) }
-  }, [refresh, snapshot.open, todos])
-
-  useEffect(() => () => {
-    for (const controller of controllers.current) controller.abort()
-    controllers.current.clear()
-  }, [])
-
-  const resetPanel = useCallback((): void => {
-    for (const controller of controllers.current) controller.abort()
-    controllers.current.clear()
-    setBusy(false)
-    setForm(undefined)
-    setConfirming(undefined)
-    setMoreOpen(false)
-    setSelectedId(undefined)
-    setDetail(undefined)
-  }, [])
-
-  const close = useCallback((): void => {
-    resetPanel()
-    closeCanvas()
-  }, [closeCanvas, resetPanel])
+  }, [refresh, tab.visible])
 
   useEffect(() => {
-    if (!snapshot.open) {
-      resetPanel()
-      return
+    mounted.current = true
+    const activeControllers = controllers.current
+    return () => {
+      mounted.current = false
+      for (const controller of activeControllers) controller.abort()
+      activeControllers.clear()
     }
-    const onOutsidePointerDown = (event: PointerEvent): void => {
-      // React 捕获阶段也会覆盖通过 Portal 渲染的抽屉菜单和对话框。
-      if (insidePointer.current === event) return
-      if (event.target instanceof Element && event.target.closest('.dsh-personal-todo-trigger') !== null) return
-      close()
+  }, [])
+
+  const transfer = async (operation: () => Promise<void>): Promise<void> => {
+    if (transferLock.current) return
+    transferLock.current = true
+    setTransferBusy(true)
+    setTransferError(undefined)
+    setTransferResult(undefined)
+    try {
+      await operation()
+    } catch (reason) {
+      if (mounted.current) setTransferError(errorText(reason))
+    } finally {
+      transferLock.current = false
+      if (mounted.current) setTransferBusy(false)
     }
-    document.addEventListener('pointerdown', onOutsidePointerDown)
-    return () => { document.removeEventListener('pointerdown', onOutsidePointerDown) }
-  }, [close, resetPanel, snapshot.open])
+  }
+
+  const downloadBackup = (): void => {
+    void transfer(async () => {
+      const result = await withController(signal => exportData(signal))
+      if (!mounted.current) return
+      const blob = new Blob([result.json], { type: 'application/json;charset=utf-8' })
+      if (blob.size > TODO_BACKUP_MAX_BYTES) throw new Error(t('data.tooLarge'))
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      try {
+        anchor.href = url
+        anchor.download = result.filename
+        document.body.append(anchor)
+        anchor.click()
+        setTransferResult(t('data.exported'))
+      } finally {
+        anchor.remove()
+        window.setTimeout(() => { URL.revokeObjectURL(url) }, 0)
+      }
+    })
+  }
+
+  const selectBackup = (file: File): void => {
+    setImportPreview(undefined)
+    void transfer(async () => {
+      if (file.size > TODO_BACKUP_MAX_BYTES) throw new Error(t('data.tooLarge'))
+      const json = await file.text()
+      if (!mounted.current) return
+      const backup = parseTodoBackup(json)
+      setImportPreview({
+        filename: file.name, json, count: backup.todos.length,
+        running: backup.todos.filter(detail => detail.todo.status === 'in_progress').length,
+      })
+    })
+  }
+
+  const confirmImport = (): void => {
+    if (importPreview === undefined) return
+    void transfer(async () => {
+      const result = await withController(signal => importData({ json: importPreview.json }, signal))
+      if (!mounted.current) return
+      setImportPreview(undefined)
+      setTransferResult(t('data.imported', { ...result }))
+      await refresh()
+    })
+  }
 
   const statusLabel = (status: TodoStatus): string => {
     if (status === 'pending') return t('status.pending')
@@ -494,8 +544,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     setBusy(true)
     setError(undefined)
     void openSession(sessionId, parentSessionId).then((opened) => {
-      if (opened) close()
-      else setError(t('state.sessionUnavailable'))
+      if (!opened) setError(t('state.sessionUnavailable'))
     }, (reason: unknown) => {
       setError(errorText(reason))
     }).finally(() => { setBusy(false) })
@@ -523,10 +572,8 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     setDetail(undefined)
   }
 
-  if (!snapshot.open) return null
-
   return (
-    <div style={{ display: 'contents' }} onPointerDownCapture={event => { insidePointer.current = event.nativeEvent }}>
+    <>
       <style>{CSS}</style>
       <section
         className="dsh-personal-todo-canvas"
@@ -540,13 +587,35 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
             </div>
             {(selectedId === undefined || form !== undefined) && <p>{form === undefined ? t('panel.description') : form.id === undefined ? t('form.description') : t('form.editDescription')}</p>}
           </div>
-          <button type="button" className="dsh-personal-todo-close" aria-label={t('panel.close')} onClick={close}>
-            <X size={18} aria-hidden="true" />
-          </button>
         </header>
         <div className="dsh-personal-todo-body">
           {form === undefined && selectedId === undefined && <>
           <div className="dsh-personal-todo-toolbar">
+            <input ref={fileInput} type="file" accept=".json,application/json" hidden aria-label={t('data.file')} onChange={event => {
+              const file = event.currentTarget.files?.[0]
+              event.currentTarget.value = ''
+              if (file !== undefined) selectBackup(file)
+            }} />
+            <Menu
+              open={dataOpen}
+              onClose={() => { setDataOpen(false) }}
+              items={[
+                { id: 'export', label: t('data.export'), icon: <Download size={16} aria-hidden="true" />, disabled: transferBusy },
+                { id: 'import', label: t('data.import'), icon: <Upload size={16} aria-hidden="true" />, disabled: transferBusy },
+              ]}
+              onSelect={id => {
+                setDataOpen(false)
+                if (transferLock.current) return
+                if (id === 'export') downloadBackup()
+                if (id === 'import') fileInput.current?.click()
+              }}
+              align="end"
+              portal
+              dense
+              anchor={<Button size="md" variant="outline" icon={<Database size={16} aria-hidden="true" />}
+                aria-haspopup="menu" aria-expanded={dataOpen} disabled={transferBusy}
+                onClick={() => { setDataOpen(current => !current) }}>{t('data.menu')}</Button>}
+            />
             <Button className="dsh-personal-todo-new" size="md" variant="primary" icon={<Plus size={16} aria-hidden="true" />} onClick={openCreateForm}>{t('action.add')}</Button>
           </div>
           <div className="dsh-personal-todo-status-row">
@@ -596,6 +665,9 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
           </div>
           </>}
           {error !== undefined && <div className="dsh-personal-todo-error" role="alert">{t('state.error', { message: error })}</div>}
+          {transferBusy && <div className="dsh-personal-todo-transfer" role="status">{t('data.busy')}</div>}
+          {transferError !== undefined && importPreview === undefined && <div className="dsh-personal-todo-error" role="alert">{t('data.error', { message: transferError })}</div>}
+          {transferResult !== undefined && <div className="dsh-personal-todo-transfer" role="status">{transferResult}</div>}
           <div className="dsh-personal-todo-workspace" data-detail={selectedId !== undefined && form === undefined} data-form={form !== undefined} data-empty={todos.length === 0 && selectedId === undefined && form === undefined} data-has-selection={selectedId !== undefined || form !== undefined}>
           <div className="dsh-personal-todo-list">
             {busy && todos.length === 0 && <div className="dsh-personal-todo-empty">{t('state.loading')}</div>}
@@ -655,6 +727,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
                 <div className="dsh-personal-todo-deadline"><CalendarDays size={14} aria-hidden="true" /><span>{t('field.dueAt')}</span>{detail.todo.dueAt === null ? <span>{t('meta.noDueDate')}</span> : <time dateTime={detail.todo.dueAt}>{new Date(detail.todo.dueAt).toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time>}</div>
                 <div className="dsh-personal-todo-detail-actions">
                   {detail.todo.status === 'pending' && <Button className="dsh-personal-todo-new" size="sm" variant="primary" icon={<Play size={14} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => start(detail.todo.id, signal)) }}>{t('action.start')}</Button>}
+                  {(detail.todo.status === 'pending' || detail.todo.status === 'in_progress' || detail.todo.status === 'blocked') && <Button size="sm" variant="outline" icon={<CircleCheck size={16} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => approve(detail.todo.id, signal)) }}>{t('action.complete')}</Button>}
                   {detail.todo.primarySessionId !== null && <Button size="sm" variant="primary" onClick={() => { openConversation(detail.todo.primarySessionId as string, null) }}>{t('action.openConversation')}</Button>}
                   <Button size="sm" variant="ghost" icon={<Pencil size={16} aria-hidden="true" />} disabled={busy} onClick={() => { setForm(formOf(detail.todo)) }}>{t('action.edit')}</Button>
                   <Button size="sm" variant="ghost" icon={<Copy size={16} aria-hidden="true" />} disabled={busy} onClick={() => { copyTodo(detail.todo) }}>{t('action.copy')}</Button>
@@ -714,6 +787,24 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
         </div>
       </section>
       <Modal
+        open={importPreview !== undefined}
+        onClose={() => { if (!transferLock.current) { setImportPreview(undefined); setTransferError(undefined) } }}
+        title={t('data.confirmTitle')}
+        closeLabel={t('data.close')}
+        className="dsh-personal-todo-small-dialog"
+        footer={<>
+          <Button variant="outline" disabled={transferBusy} onClick={() => { setImportPreview(undefined); setTransferError(undefined) }}>{t('action.cancel')}</Button>
+          <Button variant="primary" disabled={transferBusy} onClick={confirmImport}>{transferBusy ? t('data.busy') : t('data.confirm')}</Button>
+        </>}
+      >
+        <div className="dsh-personal-todo-transfer" aria-busy={transferBusy}>
+          {importPreview !== undefined && <p>{t('data.preview', { filename: importPreview.filename, count: importPreview.count, running: importPreview.running })}</p>}
+          <p>{t('data.warning')}</p>
+          <p>{t('data.sessions')}</p>
+          {transferError !== undefined && <div role="alert">{t('data.error', { message: transferError })}</div>}
+        </div>
+      </Modal>
+      <Modal
         open={confirming !== undefined}
         onClose={() => { setConfirming(undefined) }}
         title={t('delete.title')}
@@ -728,6 +819,6 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
           })
         }}>{t('action.delete')}</Button></>}
       />
-    </div>
+    </>
   )
 }
