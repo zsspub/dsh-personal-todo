@@ -1,0 +1,51 @@
+[
+  {
+    "state": "展开",
+    "boxes": [
+      {
+        "height": 42,
+        "width": 260,
+        "x": 10,
+        "y": 857
+      },
+      {
+        "height": 42,
+        "width": 260,
+        "x": 10,
+        "y": 899
+      },
+      {
+        "height": 42,
+        "width": 260,
+        "x": 10,
+        "y": 945
+      }
+    ]
+  },
+  {
+    "calendar": true
+  },
+  {
+    "state": "收起",
+    "boxes": [
+      {
+        "height": 36,
+        "width": 36,
+        "x": 9.75,
+        "y": 865
+      },
+      {
+        "height": 36,
+        "width": 36,
+        "x": 9.75,
+        "y": 901
+      }
+    ]
+  },
+  {
+    "todo": true
+  },
+  {
+    "restored": true
+  }
+]

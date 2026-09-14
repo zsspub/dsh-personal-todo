@@ -3,16 +3,16 @@ import React, {
 } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  Button, MarkdownText, Menu, Modal,
+  Button, MarkdownText, Menu, Modal, type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { Archive, ArrowDown, ArrowLeft, CalendarDays, ChevronRight, ChevronsUp, CircleCheck, CircleDashed, CircleDot, CircleX, ClipboardCheck, ClipboardList, Copy, Ellipsis, Equal, Flag, GitBranch, ListTodo, LoaderCircle, MessageCircle, MessageSquare, Pencil, Play, Plus, Tag, Trash2, Undo2, UserRound } from 'lucide-react'
+import { Archive, ArrowDown, ArrowLeft, CalendarDays, ChevronRight, ChevronsUp, CircleCheck, CircleDashed, CircleDot, CircleX, ClipboardCheck, ClipboardList, Copy, Ellipsis, Equal, Flag, GitBranch, ListTodo, MessageSquare, Pencil, Play, Plus, Tag, Trash2, Undo2, UserRound } from 'lucide-react'
 import type {
   CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest,
   RequestTodoChangesRequest, Todo, TodoDetail, TodoEventType, TodoListResult,
   TodoPriority, TodoSession, TodoStatus, UpdateTodoRequest,
 } from '../types.ts'
 import { TODO_STATUSES } from '../types.ts'
-import type { ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult } from '../types.ts'
+import type { ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, SetTodoStatusRequest } from '../types.ts'
 import { parseTodoBackup, TODO_BACKUP_MAX_BYTES } from '../backup.ts'
 import { Database, Download, Upload } from 'lucide-react'
 import type { PersonalTodoCanvasController } from './canvas.ts'
@@ -75,7 +75,7 @@ const CSS = `
 .dsh-personal-todo-error{padding:10px 12px;border-radius:10px;background:var(--dsw-alias-state-error-secondary);color:var(--dsw-alias-label-error);font-size:13px}
 .dsh-personal-todo-more{align-self:center}.dsh-personal-todo-detail-pane{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0}.dsh-personal-todo-detail{min-width:0;min-height:0;flex:1;overflow:auto;padding:18px 20px}
 .dsh-personal-todo-workspace[data-detail=true]{border:0;border-radius:0;margin-right:calc(-1 * var(--todo-edge-padding))}.dsh-personal-todo-workspace[data-detail=true] .dsh-personal-todo-commandbar{margin-right:var(--todo-edge-padding)}.dsh-personal-todo-workspace[data-detail=true] .dsh-personal-todo-detail{padding:12px calc(var(--todo-edge-padding) + 4px) 20px 4px;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-border-l3) transparent}.dsh-personal-todo-detail-section{margin-top:24px;padding-top:20px;border-top:1px solid var(--dsw-alias-border-l2)}.dsh-personal-todo-detail .dsh-personal-todo-detail-section h3{margin:0 0 10px;font-weight:600}.dsh-personal-todo-detail-summary{display:flex;min-width:0;width:100%;flex-direction:column;gap:16px}.dsh-personal-todo-detail-summary h2{line-height:28px}.dsh-personal-todo-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;width:100%}.dsh-personal-todo-title-row h2{flex:1;min-width:0}.dsh-personal-todo-title-row .dsh-personal-todo-badge{flex:none;white-space:nowrap;font-size:12px;line-height:20px}.dsh-personal-todo-detail .dsh-personal-todo-meta{gap:12px 16px;margin-top:0;line-height:22px}.dsh-personal-todo-detail .dsh-personal-todo-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;background:var(--dsw-alias-interactive-bg-hover-solid)}.dsh-personal-todo-owner{display:inline-flex;align-items:center;gap:6px;min-width:0;overflow-wrap:anywhere}.dsh-personal-todo-owner svg,.dsh-personal-todo-detail .dsh-personal-todo-badge svg{flex:none}.dsh-personal-todo-detail-actions .dsh-personal-todo-delete{color:var(--dsw-alias-state-error-primary)}.dsh-personal-todo-session-empty{display:flex;align-items:flex-start;gap:10px;color:var(--dsw-alias-label-secondary)}.dsh-personal-todo-session-empty svg{flex:none;margin-top:2px}.dsh-personal-todo-detail .dsh-personal-todo-session-empty p{margin:0;font-size:12px}.dsh-personal-todo-event>svg{margin-top:2px;color:var(--dsw-alias-label-tertiary)}.dsh-personal-todo-event-content{display:flex;min-width:0;flex-direction:column;gap:4px;overflow-wrap:anywhere}.dsh-personal-todo-event-content time{font-size:11px;line-height:18px}.dsh-personal-todo-detail .dsh-personal-todo-event-content p{margin:0;font-size:12px}
-.dsh-personal-todo-detail-header{display:flex;align-items:flex-start;flex-direction:column;gap:20px}.dsh-personal-todo-detail-actions{display:flex;gap:6px;flex-wrap:wrap}
+.dsh-personal-todo-detail-header{display:flex;align-items:flex-start;flex-direction:column;gap:20px}.dsh-personal-todo-detail-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;max-width:100%}.dsh-personal-todo-detail-actions>button{flex:none}
 .dsh-personal-todo-heading-row{display:flex;align-items:center;gap:8px}.dsh-personal-todo-back{display:grid;place-items:center;flex:none;width:28px;height:28px;margin-left:-4px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer}.dsh-personal-todo-back:hover{background:var(--dsw-alias-interactive-bg-hover)}.dsh-personal-todo-back:focus-visible{outline:2px solid var(--dsw-alias-brand-primary-new-colorprimary-new-color);outline-offset:2px}.dsh-personal-todo-detail-summary+.dsh-personal-todo-deadline{margin-top:-12px}
 .dsh-personal-todo-deadline{display:grid;grid-template-columns:14px auto minmax(0,1fr);align-items:start;gap:10px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:20px}.dsh-personal-todo-deadline svg{flex:none;margin-top:3px}.dsh-personal-todo-deadline time{overflow-wrap:anywhere;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary)}
 .dsh-personal-todo-callout{margin-top:14px;padding:12px;border-radius:12px;background:var(--dsw-alias-bg-layer-3);border:1px solid var(--dsw-alias-border-l2)}
@@ -109,6 +109,8 @@ export interface PersonalTodoPanelInjected {
   readonly start: (id: string, signal: AbortSignal) => Promise<Todo>
   readonly reply: (request: ReplyTodoRequest, signal: AbortSignal) => Promise<Todo>
   readonly approve: (id: string, signal: AbortSignal) => Promise<Todo>
+  readonly setStatus: (request: SetTodoStatusRequest, signal: AbortSignal) => Promise<Todo>
+  readonly stop: (id: string, signal: AbortSignal) => Promise<Todo>
   readonly archive: (id: string, signal: AbortSignal) => Promise<Todo>
   readonly restore: (id: string, signal: AbortSignal) => Promise<Todo>
   readonly requestChanges: (request: RequestTodoChangesRequest, signal: AbortSignal) => Promise<Todo>
@@ -144,17 +146,15 @@ const EMPTY_FORM: FormState = { title: '', notes: '', assignee: '', priority: 'n
 const ACTIVE_REFRESH_MS = 2_000
 const STATUS_ICONS = {
   pending: CircleDashed,
-  in_progress: LoaderCircle,
-  blocked: MessageCircle,
-  in_review: ClipboardCheck,
+  in_progress: CircleDot,
   completed: CircleCheck,
   cancelled: CircleX,
 } satisfies Record<TodoStatus, typeof CircleDot>
-const PRIMARY_VIEWS = ['pending', 'in_progress', 'blocked', 'in_review'] as const satisfies readonly TodoStatus[]
-const MORE_VIEWS = ['completed', 'cancelled', 'archived'] as const satisfies readonly View[]
+const PRIMARY_VIEWS = ['pending', 'in_progress', 'completed'] as const satisfies readonly TodoStatus[]
+const MORE_VIEWS = ['cancelled', 'archived'] as const satisfies readonly View[]
 
 function isMoreView(value: View): value is (typeof MORE_VIEWS)[number] {
-  return value === 'completed' || value === 'cancelled' || value === 'archived'
+  return value === 'cancelled' || value === 'archived'
 }
 
 function errorText(error: unknown): string {
@@ -218,8 +218,8 @@ export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, useSess
     const refresh = (): void => {
       controller?.abort()
       controller = new AbortController()
-      void list({ statuses: ['pending', 'blocked', 'in_review'], limit: 1 }, controller.signal).then(
-        page => { canvas.setAttentionCount(page.counts.pending + page.counts.blocked + page.counts.inReview) },
+      void list({ needsAttention: true, limit: 1 }, controller.signal).then(
+        page => { canvas.setAttentionCount(page.counts.needsAttention) },
         () => undefined,
       )
     }
@@ -263,7 +263,7 @@ export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, useSess
 export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const {
     t, canvas, list, get, create, update, start, reply, approve, archive, restore,
-    requestChanges, delete: deleteTodo, openSession, useTabInfo, exportData, importData,
+    requestChanges, delete: deleteTodo, openSession, useTabInfo, exportData, importData, setStatus, stop,
   } = props
   // 同时兼容已发布版的 codeLabels 与新版 Host 的 labels 接口。
   const markdownProps = useMemo(() => {
@@ -279,12 +279,15 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const selectedIdRef = useRef<string>()
   const [detail, setDetail] = useState<TodoDetail>()
   const [moreOpen, setMoreOpen] = useState(false)
+  const [detailMenuOpen, setDetailMenuOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [form, setForm] = useState<FormState>()
   const [confirming, setConfirming] = useState<Todo>()
   const [replyText, setReplyText] = useState('')
   const [feedback, setFeedback] = useState('')
+  const [needsAttention, setNeedsAttention] = useState(false)
+  const [stopConfirmation, setStopConfirmation] = useState<{ action: string; operation: (signal: AbortSignal) => Promise<unknown> }>()
   const [dataOpen, setDataOpen] = useState(false)
   const [transferBusy, setTransferBusy] = useState(false)
   const [transferError, setTransferError] = useState<string>()
@@ -292,6 +295,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const [importPreview, setImportPreview] = useState<{ filename: string; json: string; count: number; running: number }>()
   const fileInput = useRef<HTMLInputElement>(null)
   const transferLock = useRef(false)
+  const mutationLock = useRef(false)
   const mounted = useRef(true)
   const controllers = useRef(new Set<AbortController>())
   selectedIdRef.current = selectedId
@@ -322,6 +326,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
       const page = await withController(signal => list({
         statuses: view === 'archived' ? TODO_STATUSES : [view],
         archived: view === 'archived',
+        needsAttention,
         offset,
       }, signal))
       setTodos(current => append ? [...current, ...page.todos] : page.todos.slice())
@@ -331,7 +336,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
         setSelectedId(undefined)
         setDetail(undefined)
       }
-      canvas.setAttentionCount(page.counts.pending + page.counts.blocked + page.counts.inReview)
+      canvas.setAttentionCount(page.counts.needsAttention)
       return page
     } catch (reason) {
       setError(errorText(reason))
@@ -339,7 +344,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     } finally {
       if (!silent) setBusy(false)
     }
-  }, [canvas, list, view])
+  }, [canvas, list, view, needsAttention])
 
   const refresh = useCallback(async (silent = false): Promise<void> => {
     await Promise.all([
@@ -414,7 +419,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
       const backup = parseTodoBackup(json)
       setImportPreview({
         filename: file.name, json, count: backup.todos.length,
-        running: backup.todos.filter(detail => detail.todo.status === 'in_progress').length,
+        running: backup.todos.filter(detail => detail.todo.executionStatus === 'running').length,
       })
     })
   }
@@ -433,8 +438,6 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const statusLabel = (status: TodoStatus): string => {
     if (status === 'pending') return t('status.pending')
     if (status === 'in_progress') return t('status.inProgress')
-    if (status === 'blocked') return t('status.blocked')
-    if (status === 'in_review') return t('status.inReview')
     if (status === 'cancelled') return t('status.cancelled')
     return t('status.completed')
   }
@@ -446,8 +449,6 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const viewCount = (value: View): number => {
     if (value === 'pending') return result?.counts.pending ?? 0
     if (value === 'in_progress') return result?.counts.inProgress ?? 0
-    if (value === 'blocked') return result?.counts.blocked ?? 0
-    if (value === 'in_review') return result?.counts.inReview ?? 0
     if (value === 'completed') return result?.counts.completed ?? 0
     if (value === 'cancelled') return result?.counts.cancelled ?? 0
     return result?.counts.archived ?? 0
@@ -469,6 +470,8 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   }
 
   const mutate = async (operation: (signal: AbortSignal) => Promise<unknown>, refreshSelected = true): Promise<boolean> => {
+    if (mutationLock.current) return false
+    mutationLock.current = true
     setBusy(true)
     setError(undefined)
     try {
@@ -480,17 +483,33 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
       setError(errorText(reason))
       return false
     } finally {
+      mutationLock.current = false
       setBusy(false)
     }
   }
 
   const selectTodo = (id: string): void => {
+    setDetailMenuOpen(false)
     setForm(undefined)
     setSelectedId(id)
     setReplyText('')
     setFeedback('')
     void fetchDetail(id)
   }
+
+  const taskAction = (todo: Todo, action: string, operation: (signal: AbortSignal) => Promise<unknown>): void => {
+    if (todo.activeRunId !== null) {
+      setStopConfirmation({ action, operation })
+    } else {
+      void mutate(operation)
+    }
+  }
+
+  const executionLabel = (todo: Todo): string | undefined => todo.executionStatus === null
+    ? undefined
+    : todo.executionStatus === 'submitted' && todo.activeRunId !== null
+      ? t('execution.review')
+      : t(`execution.${todo.executionStatus}`)
 
   const copyTodo = (source: Todo): void => {
     if (busy) return
@@ -563,9 +582,51 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const DetailStatusIcon = STATUS_ICONS[detail?.todo.status ?? 'pending']
   const selectedRun = detail?.runs[0]
   const assigneeGroups = groupByAssignee(todos)
+  const detailTodo = detail?.todo
+  const actionable = detailTodo !== undefined && (detailTodo.status === 'pending' || detailTodo.status === 'in_progress')
+  const archived = detailTodo !== undefined && detailTodo.archivedAt !== null
+  const hasExecution = detailTodo !== undefined && detailTodo.activeRunId !== null
+  const awaitingReply = hasExecution && detailTodo?.executionStatus === 'waiting_input'
+  const awaitingReview = hasExecution && detailTodo?.executionStatus === 'submitted'
+  const running = hasExecution && detailTodo?.executionStatus === 'running'
+  const detailMenuItems: MenuEntry[] = []
+  if (detailTodo !== undefined) {
+    if (detailTodo.status === 'pending') detailMenuItems.push({ id: 'manualStart', label: t('action.manualStart'), icon: <CircleDot size={16} /> })
+    if (detailTodo.status === 'in_progress') detailMenuItems.push({ id: 'pending', label: t('action.pending'), icon: <Undo2 size={16} /> })
+    if (actionable && (archived || (hasExecution && !awaitingReview))) detailMenuItems.push({ id: 'complete', label: t('action.complete'), icon: <CircleCheck size={16} /> })
+    if (archived && !actionable) detailMenuItems.push({ id: 'pending', label: t('action.reopen'), icon: <Undo2 size={16} /> })
+    if (hasExecution && (!running || archived)) detailMenuItems.push({ id: 'stop', label: t('action.takeOver'), icon: <CircleX size={16} /> })
+    if (detailMenuItems.length > 0) detailMenuItems.push({ id: 'management', type: 'separator' })
+    detailMenuItems.push(
+      { id: 'edit', label: t('action.edit'), icon: <Pencil size={16} /> },
+      { id: 'copy', label: t('action.copy'), icon: <Copy size={16} /> },
+    )
+    if (!archived) detailMenuItems.push({ id: 'archive', label: t('action.archive'), icon: <Archive size={16} /> })
+    detailMenuItems.push({ id: 'destructive', type: 'separator' })
+    if (actionable) detailMenuItems.push({ id: 'cancel', label: t('action.cancelTask'), icon: <CircleX size={16} /> })
+    if (archived || detailTodo.status !== 'in_progress') detailMenuItems.push({ id: 'delete', label: t('action.delete'), icon: <Trash2 size={16} />, danger: true })
+  }
+
+  const selectDetailAction = (action: string): void => {
+    setDetailMenuOpen(false)
+    if (busy || detailTodo === undefined) return
+    switch (action) {
+      case 'manualStart': void mutate(signal => setStatus({ id: detailTodo.id, status: 'in_progress' }, signal)); break
+      case 'pending': taskAction(detailTodo, t('action.pending'), signal => setStatus({ id: detailTodo.id, status: 'pending' }, signal)); break
+      case 'complete': taskAction(detailTodo, t('action.complete'), signal => approve(detailTodo.id, signal)); break
+      case 'stop': taskAction(detailTodo, t('action.takeOver'), signal => stop(detailTodo.id, signal)); break
+      case 'edit': setForm(formOf(detailTodo)); break
+      case 'copy': copyTodo(detailTodo); break
+      case 'archive': taskAction(detailTodo, t('action.archive'), signal => archive(detailTodo.id, signal)); break
+      case 'cancel': taskAction(detailTodo, t('action.cancelTask'), signal => setStatus({ id: detailTodo.id, status: 'cancelled' }, signal)); break
+      case 'delete': setConfirming(detailTodo); break
+    }
+  }
 
   const selectView = (value: View): void => {
     setView(value)
+    setDetailMenuOpen(false)
+    setNeedsAttention(false)
     setMoreOpen(false)
     setForm(undefined)
     setSelectedId(undefined)
@@ -642,7 +703,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
               }))}
               selectedId={isMoreView(view) ? view : undefined}
               onSelect={(id) => {
-                if (id === 'completed' || id === 'cancelled' || id === 'archived') selectView(id)
+                if (id === 'cancelled' || id === 'archived') selectView(id)
               }}
               align="end"
               portal
@@ -664,7 +725,8 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
             />
           </div>
           </>}
-          {error !== undefined && <div className="dsh-personal-todo-error" role="alert">{t('state.error', { message: error })}</div>}
+          {form === undefined && selectedId === undefined && view === 'in_progress' && <label className="dsh-personal-todo-transfer"><input type="checkbox" checked={needsAttention} onChange={event => { setNeedsAttention(event.target.checked) }} /> {t('execution.attention')} ({result?.counts.needsAttention ?? 0})</label>}
+          {error !== undefined && stopConfirmation === undefined && <div className="dsh-personal-todo-error" role="alert">{t('state.error', { message: error })}</div>}
           {transferBusy && <div className="dsh-personal-todo-transfer" role="status">{t('data.busy')}</div>}
           {transferError !== undefined && importPreview === undefined && <div className="dsh-personal-todo-error" role="alert">{t('data.error', { message: transferError })}</div>}
           {transferResult !== undefined && <div className="dsh-personal-todo-transfer" role="status">{transferResult}</div>}
@@ -698,7 +760,8 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
                         {todo.priority !== 'none' && <span className="dsh-personal-todo-badge" data-priority={todo.priority}>{todo.priority === 'high' ? <ChevronsUp size={14} aria-hidden="true" /> : todo.priority === 'medium' ? <Equal size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />}{priorityLabel(todo.priority)}</span>}
                         {todo.tags.map(tag => <span className="dsh-personal-todo-badge" key={tag} title={tag}><Tag size={12} aria-hidden="true" /><span className="dsh-personal-todo-tag-text">{tag}</span></span>)}
                       </div>
-                      {todo.status === 'pending' && <Button size="sm" variant="outline" icon={<Play size={14} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => start(todo.id, signal)) }}>{t('action.start')}</Button>}
+                      {executionLabel(todo) !== undefined && <span className="dsh-personal-todo-transfer">{executionLabel(todo)}</span>}
+                      {(todo.status === 'pending' || todo.status === 'in_progress') && <Button size="sm" variant="outline" icon={<CircleCheck size={14} aria-hidden="true" />} disabled={busy} onClick={() => { taskAction(todo, t('action.complete'), signal => approve(todo.id, signal)) }}>{t('action.complete')}</Button>}
                     </div>
                   </article>
                 ))}
@@ -726,25 +789,27 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
                 <div className="dsh-personal-todo-detail-summary"><div className="dsh-personal-todo-title-row"><h2>{detail.todo.title}</h2><span className="dsh-personal-todo-badge" data-status={detail.todo.status}><DetailStatusIcon size={14} aria-hidden="true" />{statusLabel(detail.todo.status)}</span></div><div className="dsh-personal-todo-meta"><span className="dsh-personal-todo-owner"><UserRound size={14} aria-hidden="true" />{t('meta.assignee', { assignee: detail.todo.assignee ?? t('assignee.unassigned') })}</span>{detail.todo.reviewRound > 0 && <span>{t('meta.reviewRound', { round: detail.todo.reviewRound })}</span>}</div></div>
                 <div className="dsh-personal-todo-deadline"><CalendarDays size={14} aria-hidden="true" /><span>{t('field.dueAt')}</span>{detail.todo.dueAt === null ? <span>{t('meta.noDueDate')}</span> : <time dateTime={detail.todo.dueAt}>{new Date(detail.todo.dueAt).toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time>}</div>
                 <div className="dsh-personal-todo-detail-actions">
-                  {detail.todo.status === 'pending' && <Button className="dsh-personal-todo-new" size="sm" variant="primary" icon={<Play size={14} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => start(detail.todo.id, signal)) }}>{t('action.start')}</Button>}
-                  {(detail.todo.status === 'pending' || detail.todo.status === 'in_progress' || detail.todo.status === 'blocked') && <Button size="sm" variant="outline" icon={<CircleCheck size={16} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => approve(detail.todo.id, signal)) }}>{t('action.complete')}</Button>}
-                  {detail.todo.primarySessionId !== null && <Button size="sm" variant="primary" onClick={() => { openConversation(detail.todo.primarySessionId as string, null) }}>{t('action.openConversation')}</Button>}
-                  <Button size="sm" variant="ghost" icon={<Pencil size={16} aria-hidden="true" />} disabled={busy} onClick={() => { setForm(formOf(detail.todo)) }}>{t('action.edit')}</Button>
-                  <Button size="sm" variant="ghost" icon={<Copy size={16} aria-hidden="true" />} disabled={busy} onClick={() => { copyTodo(detail.todo) }}>{t('action.copy')}</Button>
-                  {detail.todo.archivedAt === null && <Button size="sm" variant="ghost" icon={<Archive size={14} aria-hidden="true" />} disabled={busy} onClick={() => {
-                    void mutate(signal => archive(detail.todo.id, signal), false).then((saved) => {
-                      if (saved) { setSelectedId(undefined); setDetail(undefined) }
-                    })
-                  }}>{t('action.archive')}</Button>}
-                  {detail.todo.archivedAt !== null && <Button size="sm" variant="ghost" icon={<Undo2 size={14} aria-hidden="true" />} disabled={busy} onClick={() => {
+                  {!archived && actionable && !hasExecution && <Button size="sm" variant="primary" icon={<CircleCheck size={16} aria-hidden="true" />} disabled={busy} onClick={() => { taskAction(detail.todo, t('action.complete'), signal => approve(detail.todo.id, signal)) }}>{t('action.complete')}</Button>}
+                  {!archived && actionable && !hasExecution && <Button size="sm" variant="outline" icon={<Play size={14} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => start(detail.todo.id, signal)) }}>{t('action.start')}</Button>}
+                  {!archived && (running || awaitingReply || awaitingReview) && detail.todo.primarySessionId !== null && <Button size="sm" variant={running ? 'primary' : 'outline'} icon={<MessageSquare size={16} aria-hidden="true" />} disabled={busy} onClick={() => { openConversation(detail.todo.primarySessionId as string, null) }}>{t('action.openConversation')}</Button>}
+                  {!archived && running && <Button size="sm" variant="outline" disabled={busy} onClick={() => { taskAction(detail.todo, t('action.takeOver'), signal => stop(detail.todo.id, signal)) }}>{t('action.takeOver')}</Button>}
+                  {!archived && !actionable && <Button size="sm" variant="primary" icon={<Undo2 size={14} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => setStatus({ id: detail.todo.id, status: 'pending' }, signal)) }}>{t('action.reopen')}</Button>}
+                  {archived && <Button size="sm" variant="primary" icon={<Undo2 size={14} aria-hidden="true" />} disabled={busy} onClick={() => {
                     void mutate(signal => restore(detail.todo.id, signal), false).then((saved) => {
                       if (saved) { setSelectedId(undefined); setDetail(undefined) }
                     })
                   }}>{t('action.restore')}</Button>}
-                  {(detail.todo.archivedAt !== null || detail.todo.status === 'pending' || detail.todo.status === 'completed' || detail.todo.status === 'cancelled') && <Button className="dsh-personal-todo-delete" size="sm" variant="ghost" icon={<Trash2 size={16} aria-hidden="true" />} onClick={() => { setConfirming(detail.todo) }}>{t('action.delete')}</Button>}
+                  <Menu open={detailMenuOpen} onClose={() => { setDetailMenuOpen(false) }}
+                    items={detailMenuItems.map(item => 'type' in item ? item : { ...item, disabled: busy })}
+                    onSelect={selectDetailAction} align="end" portal dense
+                    anchor={<Button size="sm" variant="ghost" icon={<Ellipsis size={16} aria-hidden="true" />} disabled={busy}
+                      aria-label={t('action.moreActions')} aria-haspopup="menu" aria-expanded={detailMenuOpen}
+                      onClick={() => { setDetailMenuOpen(current => !current) }}>{t('action.more')}</Button>}
+                  />
                 </div>
               </div>
-              {detail.todo.status === 'in_review' && selectedRun !== undefined && <section className="dsh-personal-todo-review">
+              {executionLabel(detail.todo) !== undefined && <p className="dsh-personal-todo-transfer">{executionLabel(detail.todo)}</p>}
+              {detail.todo.executionStatus === 'submitted' && detail.todo.activeRunId !== null && selectedRun !== undefined && <section className="dsh-personal-todo-review">
                 <h3><ClipboardCheck size={18} aria-hidden="true" />{t('detail.review')}</h3>
                 <dl>
                   <div><dt><ClipboardList size={14} aria-hidden="true" />{t('review.summary')}</dt><dd>{markdown(selectedRun.resultSummary ?? '—')}</dd></div>
@@ -756,13 +821,13 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
               {detail.todo.archivedAt !== null && <div className="dsh-personal-todo-meta"><span>{t('meta.archived', { date: new Date(detail.todo.archivedAt).toLocaleString() })}</span></div>}
               {detail.todo.blockedReason !== null && <div className="dsh-personal-todo-callout"><strong>{t('detail.waitingForYou')}</strong>{markdown(detail.todo.blockedReason)}</div>}
 
-              <section className="dsh-personal-todo-detail-section"><h3>{t('detail.conversations')}</h3>
+              {detail.sessions.length > 0 && <section className="dsh-personal-todo-detail-section"><h3>{t('detail.conversations')}</h3>
               {detail.sessions.length === 0 ? <div className="dsh-personal-todo-session-empty"><MessageSquare size={18} aria-hidden="true" /><p>{t('detail.noConversations')}</p></div> : detail.sessions.map((session, index) => <button type="button" className="dsh-personal-todo-session" key={session.sessionId} aria-label={t('action.openConversation')} aria-describedby={`personal-todo-session-${index}`} disabled={busy} onClick={() => { openConversation(session.sessionId, session.parentSessionId) }}>
                 <span className="dsh-personal-todo-session-icon">{session.role === 'primary' ? <MessageSquare size={18} aria-hidden="true" /> : <GitBranch size={18} aria-hidden="true" />}</span>
                 <span className="dsh-personal-todo-session-name" id={`personal-todo-session-${index}`}>{sessionLabel(session, detail.sessions)}</span>
                 <span className="dsh-personal-todo-session-open" aria-hidden="true">{t('action.openConversation')}<ChevronRight size={16} /></span>
               </button>)}
-              </section>
+              </section>}
               <section className="dsh-personal-todo-detail-section"><h3>{t('detail.activity')}</h3>
               <div className="dsh-personal-todo-timeline">{detail.events.map(event => <div className="dsh-personal-todo-event" key={event.id}><CircleDot size={14} aria-hidden="true" /><div className="dsh-personal-todo-event-content"><strong>{eventLabel(event.type)}</strong>{event.message !== null && markdown(event.message)}<time dateTime={event.createdAt}>{new Date(event.createdAt).toLocaleString()}</time></div></div>)}</div>
               </section>
@@ -770,22 +835,30 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
             </section>
             {form !== undefined && <div className="dsh-personal-todo-form-actions">
               {form.id !== undefined && <Button variant="outline" onClick={() => { setForm(undefined) }}>{t('action.cancel')}</Button>}
-              {form.id === undefined && <Button variant="outline" disabled={busy || form.title.trim() === ''} onClick={() => { saveForm(false) }}>{t('action.createOnly')}</Button>}
-              <Button className="dsh-personal-todo-new" variant="primary" disabled={busy || form.title.trim() === ''} onClick={() => { saveForm(form.id === undefined) }}>{form.id === undefined ? t('action.create') : t('action.save')}</Button>
+              {form.id === undefined && <Button variant="outline" disabled={busy || form.title.trim() === ''} onClick={() => { saveForm(true) }}>{t('action.create')}</Button>}
+              <Button className="dsh-personal-todo-new" variant="primary" disabled={busy || form.title.trim() === ''} onClick={() => { saveForm(false) }}>{form.id === undefined ? t('action.createOnly') : t('action.save')}</Button>
             </div>}
-            {form === undefined && detail !== undefined && detail.todo.id === selectedId && detail.todo.status === 'blocked' && <div className="dsh-personal-todo-commandbar"><textarea aria-label={t('reply.aria')} value={replyText} onChange={event => { setReplyText(event.target.value) }} placeholder={t('reply.placeholder')} /><div className="dsh-personal-todo-commandbar-actions"><Button variant="primary" disabled={busy || replyText.trim() === ''} onClick={() => { void mutate(signal => reply({ id: detail.todo.id, message: replyText }, signal)).then(saved => { if (saved) setReplyText('') }) }}>{t('action.reply')}</Button></div></div>}
-            {form === undefined && detail !== undefined && detail.todo.id === selectedId && detail.todo.status === 'in_review' && <section className="dsh-personal-todo-commandbar dsh-personal-todo-review-actions" aria-label={t('review.actions')}>
+            {form === undefined && !archived && detail !== undefined && detail.todo.id === selectedId && detail.todo.activeRunId !== null && detail.todo.executionStatus === 'waiting_input' && <div className="dsh-personal-todo-commandbar"><textarea aria-label={t('reply.aria')} value={replyText} onChange={event => { setReplyText(event.target.value) }} placeholder={t('reply.placeholder')} /><div className="dsh-personal-todo-commandbar-actions"><Button variant="primary" disabled={busy || replyText.trim() === ''} onClick={() => { void mutate(signal => reply({ id: detail.todo.id, message: replyText }, signal)).then(saved => { if (saved) setReplyText('') }) }}>{t('action.reply')}</Button></div></div>}
+            {form === undefined && !archived && detail !== undefined && detail.todo.id === selectedId && detail.todo.activeRunId !== null && detail.todo.executionStatus === 'submitted' && <section className="dsh-personal-todo-commandbar dsh-personal-todo-review-actions" aria-label={t('review.actions')}>
               <div className="dsh-personal-todo-review-action-heading"><strong>{t('review.actions')}</strong><span>{t('review.actionHint')}</span></div>
               <textarea aria-label={t('feedback.aria')} value={feedback} onChange={event => { setFeedback(event.target.value) }} placeholder={t('feedback.placeholder')} />
               <div className="dsh-personal-todo-commandbar-actions">
                 <Button variant="outline" icon={<MessageSquare size={16} aria-hidden="true" />} disabled={busy || feedback.trim() === ''} onClick={() => { void mutate(signal => requestChanges({ id: detail.todo.id, feedback }, signal)).then(saved => { if (saved) setFeedback('') }) }}>{t('action.requestChanges')}</Button>
-                <Button className="dsh-personal-todo-new" variant="primary" icon={<CircleCheck size={16} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => approve(detail.todo.id, signal)) }}>{t('action.approve')}</Button>
+                <Button className="dsh-personal-todo-new" variant="primary" icon={<CircleCheck size={16} aria-hidden="true" />} disabled={busy} onClick={() => { taskAction(detail.todo, t('action.approve'), signal => approve(detail.todo.id, signal)) }}>{t('action.approve')}</Button>
               </div>
             </section>}
           </div>
           </div>
         </div>
       </section>
+      <Modal open={stopConfirmation !== undefined} onClose={() => { if (!busy) setStopConfirmation(undefined) }}
+        title={t('execution.stopTitle')} closeLabel={t('execution.stopClose')}
+        description={t('execution.stopDescription', { action: stopConfirmation?.action ?? '' })}
+        className="dsh-personal-todo-small-dialog"
+        footer={<><Button variant="outline" disabled={busy} onClick={() => { setStopConfirmation(undefined) }}>{t('action.cancel')}</Button><Button variant="primary" disabled={busy} onClick={() => {
+          if (stopConfirmation !== undefined) void mutate(stopConfirmation.operation).then(saved => { if (saved) setStopConfirmation(undefined) })
+        }}>{t('execution.stopConfirm')}</Button></>}
+      >{error !== undefined && <p role="alert">{error}</p>}</Modal>
       <Modal
         open={importPreview !== undefined}
         onClose={() => { if (!transferLock.current) { setImportPreview(undefined); setTransferError(undefined) } }}

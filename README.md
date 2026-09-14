@@ -9,21 +9,21 @@ read_when:
 
 English | [中文](README.zh.md)
 
-`dsh-personal-todo` is an installable DeepSeek Harness bundle that uses personal todos to drive ordinary DSH Agent Sessions. The todo remains the user-facing task, while its root Session records the execution transcript and can be opened on demand.
+`dsh-personal-todo` 支持用户自行推进待办，也支持按需交给 DSH Agent 执行，无需预先区分任务类型。任务进度与 Agent 执行信息独立，完整使用说明见[中文文档](README.zh.md)。
 
 ## Features
 
-- 支持面板与 Agent 工具的完整 JSON 导入导出：包含全部待办和历史，重复 ID 跳过，新增执行中待办转为待处理，不自动派发。操作、格式与限制见[数据导入导出](README.zh.md#数据导入导出)。
-- Type `@` in chat to browse Pending, In progress, Waiting for reply, or In review categories. Press Tab to drill into todos, then select one to insert a reference. Completed, cancelled, and archived items from More are excluded. Type within a category to search titles, notes, or assignees (up to 50 results); sending resolves the latest todo details. Requires DSH `ui-input-trigger >=0.1.2-rc.1`.
+- 支持面板与 Agent 工具的完整 JSON 导入导出：导出版本 2，兼容导入版本 1/2。重复 ID 跳过，仅新增且 Agent 正在运行的任务转为待办，人工进行中保持不变。见[数据导入导出](README.zh.md#数据导入导出)。
+- 聊天输入框的 `@` 引用仅展示待办和进行中分类，支持按 Tab 进入、关键词搜索和发送时读取最新详情。需要 DSH `ui-input-trigger >=0.1.2-rc.1`。
 - Durable SQLite storage with schema versioning, WAL, foreign keys, a busy timeout, and owner-only filesystem permissions.
 - One durable root Session per started todo, reused for blocked replies and review changes.
 - Automatic discovery of delegated child Sessions, including nested children, as related todo conversations.
-- Process-start recovery for durable in-progress runs, without duplicating work already owned by a running Agent.
-- A sidebar attention count for pending todos and work waiting on a user reply or review.
-- Explicit `pending`, `in_progress`, `blocked`, `in_review`, `completed`, and `cancelled` task states; users can complete any active task directly, without submitting it for review first.
+- 服务重启仅恢复未归档且仍为 `running` 的活动 Run；人工进行中和已停止任务不自动执行。
+- 侧栏计数与“需要我处理”筛选仅包含等待用户回复或确认结果的任务。
+- 主进度为 `pending`、`in_progress`、`completed`，次级状态为 `cancelled`，归档独立；Agent 执行信息单独展示。
 - Durable run, Session-link, and activity history alongside the current todo snapshot.
 - Agent tools for creation, query, editing, progress, blocking questions, review submission, and deletion.
-- A native Host right-Sidebar tab that reuses the Host's open, close, fullscreen, resizable-width, and multi-tab behavior. Its content keeps the right-aligned New button, counted active-status tabs, icon-only More menu, assignee-grouped cards, two-line summaries, click-through details, blocked replies, review summaries, change requests, activity history, and conversation navigation. The sidebar action is disabled when no Session is current.
+- 面板复用宿主右侧 Sidebar Tab，主 Tab 为待办、进行中、已完成，“更多”收纳已取消和归档，“数据”菜单独立。支持负责人分组、手动流转、回复问题、确认结果、继续修改与会话跳转。
 - Todos in any lifecycle state can move to a separate archive view, then return to the matching list or be permanently deleted.
 - Typed English and Chinese client dictionaries.
 
@@ -53,19 +53,21 @@ The bundle patch mounts the Host service and tools. Its Web manifest loads the c
 
 | Tool | Purpose |
 | --- | --- |
-| `personal_todo_add` | Create a todo with optional notes, assignee, status, priority, due time, and tags. Priority defaults to medium when omitted. |
+| `personal_todo_add` | 创建待办，只保存不执行；支持备注、负责人、优先级、截止时间和标签，默认中优先级。 |
 | `personal_todo_list` | Filter and page todos; returns matching rows, total, global status counts, and `hasMore`. |
 | `personal_todo_update` | Replace any supplied mutable fields; `null` clears notes, assignee, or due time and `[]` clears tags. |
 | `personal_todo_progress` | Record a meaningful milestone from the todo's primary Agent Session. |
 | `personal_todo_block` | Pause execution and surface one question in the task center. |
 | `personal_todo_submit_review` | Submit a summary, verification, and remaining risk for user review. |
 | `personal_todo_delete` | Permanently delete one todo by UUID. |
+| `personal_todo_export` | 返回 `{ filename, json }` 完整备份，由宿主文件工具保存。 |
+| `personal_todo_import` | 接收 `{ json }`，增量导入并返回新增、跳过及执行重置数量。 |
 
-Lists show every active workflow state and exclude archived records by default. Pass `statuses: ["completed"]` to read completed history. Pass `archived: true` to read archived active records, optionally combined with `statuses` to filter the archive. Lifecycle fields are changed only by start, block, reply, review, approval, and change-request commands; archiving preserves the current lifecycle state, does not interrupt a running Agent, and generic editing cannot change lifecycle fields. The existing `approve({ id })` service/API accepts `pending`, `in_progress`, `blocked`, and `in_review`; completed and cancelled tasks reject completion. In task details, choose Mark complete for the first three states, or Approve for a review submission.
+列表默认返回待办和进行中，排除归档。`needsAttention: true` 筛选等待用户回复或确认结果的活动 Run。通用编辑不能修改任务进度，Agent 工具不能代替用户确认完成。Remote 新增 `setStatus({ id, status }, signal)` 和 `stop({ id }, signal)`；原 `approve` 保留，等价于用户设置已完成。
 
 ## Task flow
 
-In the Web task center, Create saves a pending todo; Create and start also starts execution immediately. Starting any pending todo creates or adopts a deterministic ordinary Session and sends the task brief to its Agent. The Agent chooses the execution approach and tools, and may work directly or delegate as appropriate; every delegated child and nested descendant is attached to the todo when DSH publishes its Session. The Agent reports milestones, blocks on an explicit question when user input is required, and submits results to `in_review`. The sidebar count surfaces blocked and review-ready work without opening the task center. After a DSH process restart, the plugin resumes durable `in_progress` runs whose Agent is not already running. Approving the submission sets `completed`; requesting changes creates another run in the same root Session and returns the todo to `in_progress`.
+默认创建和手动标为进行中均不创建会话、不发送消息。“交给 Agent”才启动执行，回复和继续修改复用专属主会话。Agent 提问或提交结果后，任务仍为进行中，只改变 `executionStatus`。用户可停止后接手、完成、取消、退回或归档；重开只回待办，不自动执行。详见[任务流程](README.zh.md#任务流程)。
 
 ## Configuration
 
@@ -86,7 +88,9 @@ Override the generated plugin entry in the profile patch when deployment policy 
 
 Titles are trimmed and limited to 200 characters. Notes are trimmed and limited to 10,000 characters. Assignees are optional, trimmed, and limited to 100 characters; unassigned todos appear in a dedicated group after named assignees. A todo accepts up to 20 unique lowercase tags of at most 32 characters each. Due times must be RFC 3339 timestamps and are returned in canonical UTC form.
 
-Completing a todo sets `completedAt`, clears its blocked reason and active Run reference, and preserves its review count and history. Direct completion closes a running or waiting Run as `cancelled` and records an `updated` activity with the user completion message; approving a submission preserves the submitted Run and records `review_approved`. Neither action interrupts an existing Agent; subsequent progress, blocking, or review submissions are rejected for the completed todo, and it is excluded from restart recovery. Archived active todos can also be completed and remain archived. Agent tools continue to submit results for user review. Archiving sets `archivedAt` and removes the record from its normal list; restoring clears `archivedAt` and returns it according to its current lifecycle state. Archiving does not interrupt the Agent, and run, Session-link, and activity history remain until an explicit delete. Active ordering surfaces review and blocked items before running and pending work. Older databases migrate in place to the current task, archive, and related-conversation schema on first load.
+完成、取消、退回和归档前先取消专属主会话及关联子 Agent，并等待真正空闲；15 秒内不能确认停止则返回错误，不更改任务进度。已产生的外部修改不会撤销，部分 Agent 可能已停止。不要在专属执行会话中进行无关工作。历史 Run、结果和会话关联保留；归档恢复和任务重开不自动执行。
+
+数据库自动迁移到 schema 6：旧 `blocked`、`in_review` 转为 `in_progress`，原 Run 与关联记录保留。升级后不应使用旧插件直接打开同一数据库。JSON 备份版本独立于数据库 schema，兼容导入版本 1/2，限制 20 MiB。**会话关联不是会话备份**：原 DSH 会话不存在时，待回复、审核修改和历史对话跳转不能靠导入恢复；备份不含会话正文、附件、插件配置或凭证。
 
 ## Development
 

@@ -1,0 +1,18 @@
+[
+  {
+    "scene": "标题返回与底部无取消",
+    "pass": true
+  },
+  {
+    "scene": "填写后返回列表",
+    "pass": true
+  },
+  {
+    "scene": "再次新建为空表单",
+    "pass": true
+  },
+  {
+    "scene": "键盘返回",
+    "pass": true
+  }
+]

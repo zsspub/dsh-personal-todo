@@ -19,11 +19,11 @@ function setup() {
 afterEach(() => { for (const store of stores.splice(0)) store.close() })
 
 describe('todo input references', () => {
-  it('shows only the four active categories, drills with Tab and returns via breadcrumbs', async () => {
+  it('仅展示两个未完成进度分类，支持进入和返回', async () => {
     const { store, source } = setup()
     const todo = store.create({ title: '发布插件' })
     const folders = await source.candidates(session, request())
-    expect(folders.map(item => item.name)).toEqual(['待处理', '进行中', '待回复', '待审核'])
+    expect(folders.map(item => item.name)).toEqual(['待办', '进行中'])
     expect(folders[0]).toMatchObject({ description: '1', drill: true })
     expect(source.onPick({ ...pick(folders[0]!), action: 'drill' })).toEqual({ text: '@todo/pending/', continue: true })
     expect(source.onPick(pick(folders[0]!))).toEqual({ text: '@todo/pending/', continue: true })
@@ -33,7 +33,7 @@ describe('todo input references', () => {
     expect(source.onPick(pick(items[0]!))).toMatchObject({ insert: { source: TODO_SOURCE, ref: todo.id, label: todo.title } })
     expect(source.onPick({ ...pick(items[0]!), action: 'drill' })).toBeUndefined()
     const header = source.header!(session, { query: 'todo/pending/', drilled: true })!
-    expect(header.map(item => item.label)).toEqual(['个人待办', '待处理'])
+    expect(header.map(item => item.label)).toEqual(['个人待办', '待办'])
     expect(source.onPick({ ...pick({ name: header[0]!.label, value: header[0]!.value }), action: 'drill' })).toEqual({ text: '@', continue: true })
     expect(source.header!(session, { query: '', drilled: false })).toBeUndefined()
   })
@@ -47,9 +47,9 @@ describe('todo input references', () => {
       expect(await source.candidates(session, request(`todo/pending/${query}`))).toMatchObject([{ value: todo.id }])
     }
     expect(await source.candidates(session, request('todo/pending/插件'))).toHaveLength(1)
-    expect(await source.candidates(session, request('todo/in_review/'))).toEqual([])
-    expect(list).toHaveBeenLastCalledWith({ statuses: ['in_review'], search: '', limit: 50 }, expect.any(AbortSignal))
-    expect(await source.candidates(session, request('待回复'))).toMatchObject([{ value: '@todo/blocked/' }])
+    expect(await source.candidates(session, request('todo/in_progress/'))).toEqual([])
+    expect(list).toHaveBeenLastCalledWith({ statuses: ['in_progress'], search: '', limit: 50 }, expect.any(AbortSignal))
+    expect(await source.candidates(session, request('进行中'))).toMatchObject([{ value: '@todo/in_progress/' }])
     expect(await source.candidates(session, request('todo/pending/不存在'))).toEqual([])
     store.update(todo.id, { title: '新标题' })
     expect(await source.candidates(session, request('todo/pending/新标题'))).toMatchObject([{ value: todo.id }])
@@ -91,7 +91,7 @@ describe('todo input references', () => {
     const late = new AbortController()
     list.mockImplementationOnce(async () => {
       late.abort()
-      return { todos: [], total: 0, hasMore: false, counts: { pending: 0, inProgress: 0, blocked: 0, inReview: 0, completed: 0, cancelled: 0, archived: 0 } }
+      return { todos: [], total: 0, hasMore: false, counts: { pending: 0, inProgress: 0, needsAttention: 0, completed: 0, cancelled: 0, archived: 0 } }
     })
     await expect(source.candidates(session, request('todo/pending/', late.signal))).rejects.toThrow()
   })

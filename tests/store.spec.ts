@@ -43,6 +43,52 @@ afterEach(() => {
 })
 
 describe('TodoStore', () => {
+  it('迁移版本 5 的待回复和待审核，只转换主进度，不丢关联记录', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'todo-v5-'))
+    completionDirectories.push(directory)
+    const databasePath = join(directory, 'todos.sqlite3')
+    const original = store({ databasePath, ids: ['waiting', 'review'] })
+    for (const id of ['waiting', 'review']) {
+      original.create({ title: id, assignee: '张三', tags: ['工作'] })
+      original.beginRun(id, `run-${id}`, `session-${id}`)
+      original.linkRelatedSession(`session-${id}`, `child-${id}`)
+      if (id === 'waiting') original.block({ id, question: '请确认' }, `session-${id}`)
+      else original.submitReview({ id, summary: '已提交' }, `session-${id}`)
+    }
+    const before = ['waiting', 'review'].map(id => original.detail(id))
+    original.close()
+    const database = new DatabaseSync(databasePath)
+    database.exec(`
+      PRAGMA ignore_check_constraints = ON;
+      UPDATE todos SET status = 'blocked' WHERE id = 'waiting';
+      UPDATE todos SET status = 'in_review' WHERE id = 'review';
+      PRAGMA user_version = 5;
+    `)
+    database.close()
+    const migrated = store({ databasePath })
+    expect(['waiting', 'review'].map(id => migrated.detail(id))).toEqual(before)
+    expect(migrated.list({ needsAttention: true })).toMatchObject({
+      total: 2, counts: { inProgress: 2, needsAttention: 2 },
+    })
+    const check = new DatabaseSync(databasePath)
+    expect(check.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+    expect(check.prepare('PRAGMA user_version').get()).toMatchObject({ user_version: 6 })
+    check.close()
+  })
+
+  it('人工任务可流转全部主进度，进行中不要求 Run，重复设置无额外活动', () => {
+    const todos = store()
+    const todo = todos.create({ title: '取快递' })
+    for (const status of ['in_progress', 'pending', 'completed', 'pending', 'cancelled'] as const) {
+      expect(todos.setStatus(todo.id, status)).toMatchObject({ status, executionStatus: null, activeRunId: null })
+      const before = todos.detail(todo.id)
+      todos.setStatus(todo.id, status)
+      expect(todos.detail(todo.id)).toEqual(before)
+    }
+    expect(todos.recoverableTodos()).toEqual([])
+    expect(todos.detail(todo.id).sessions).toEqual([])
+  })
+
   it('creates normalized pending todos with an initial activity record', () => {
     const todos = store()
     const todo = todos.create({
@@ -60,6 +106,7 @@ describe('TodoStore', () => {
       notes: 'finish the README',
       assignee: 'Alice',
       status: 'pending',
+      executionStatus: null,
       priority: 'high',
       dueAt: '2026-03-03T21:06:07.000Z',
       tags: ['this-week', 'work'],
@@ -77,7 +124,7 @@ describe('TodoStore', () => {
     expect(todos.detail(todo.id).events).toMatchObject([{ type: 'created', message: null }])
     expect(todos.list()).toMatchObject({
       total: 1,
-      counts: { pending: 1, inProgress: 0, blocked: 0, inReview: 0, completed: 0, cancelled: 0, archived: 0 },
+      counts: { pending: 1, inProgress: 0, needsAttention: 0, completed: 0, cancelled: 0, archived: 0 },
     })
   })
 
@@ -90,7 +137,7 @@ describe('TodoStore', () => {
     })
     expect(todos.progress(created.id, 'session-1', 'Implemented storage')).toMatchObject({ latestSummary: 'Implemented storage' })
     expect(todos.block({ id: created.id, question: 'Which behavior should win?' }, 'session-1')).toMatchObject({
-      status: 'blocked', blockedReason: 'Which behavior should win?',
+      status: 'in_progress', executionStatus: 'waiting_input', blockedReason: 'Which behavior should win?',
     })
     expect(todos.reply({ id: created.id, message: 'Use the task behavior.' })).toMatchObject({
       status: 'in_progress', blockedReason: null,
@@ -100,7 +147,7 @@ describe('TodoStore', () => {
       summary: 'Implemented the requested behavior.',
       verification: 'Unit tests passed.',
       risk: null,
-    }, 'session-1')).toMatchObject({ status: 'in_review', reviewRound: 1 })
+    }, 'session-1')).toMatchObject({ status: 'in_progress', executionStatus: 'submitted', reviewRound: 1 })
     expect(todos.approve(created.id)).toMatchObject({ status: 'completed', completedAt: expect.any(String), activeRunId: null })
 
     const detail = todos.detail(created.id)
@@ -155,22 +202,21 @@ describe('TodoStore', () => {
     expect(todos.detail(created.id).events.map(event => event.type).slice(0, 2)).toEqual(['restored', 'archived'])
   })
 
-  it('archives in-progress todos without interrupting their Agent lifecycle', () => {
+  it('归档前必须停止执行，恢复归档不自动启动 Agent', () => {
     const todos = store({ times: Array.from({ length: 8 }, (_, index) => Date.UTC(2026, 1, index + 1)) })
     const created = todos.create({ title: 'Still running' })
     todos.beginRun(created.id, 'run-1', 'session-1')
 
+    expect(() => todos.archive(created.id)).toThrow('请先停止')
+    todos.stopExecution(created.id)
     expect(todos.archive(created.id)).toMatchObject({ status: 'in_progress', archivedAt: expect.any(String) })
     expect(todos.list()).toMatchObject({ total: 0, counts: { inProgress: 0, archived: 1 } })
     expect(todos.list({ archived: true })).toMatchObject({
       total: 1,
       todos: [{ id: created.id, status: 'in_progress' }],
     })
-    expect(todos.progress(created.id, 'session-1', 'Work continued while archived')).toMatchObject({
-      status: 'in_progress',
-      archivedAt: expect.any(String),
-      latestSummary: 'Work continued while archived',
-    })
+    expect(() => todos.progress(created.id, 'session-1', '不应继续')).toThrow('no active run')
+    expect(todos.recoverableTodos()).toEqual([])
     expect(todos.restore(created.id)).toMatchObject({ status: 'in_progress', archivedAt: null })
     expect(todos.list()).toMatchObject({ total: 1, todos: [{ id: created.id }] })
   })
@@ -179,6 +225,7 @@ describe('TodoStore', () => {
     const todos = store()
     const created = todos.create({ title: 'Delete from archive' })
     todos.beginRun(created.id, 'run-1', 'session-1')
+    todos.stopExecution(created.id)
     todos.archive(created.id)
 
     expect(todos.delete(created.id)).toEqual({ id: created.id, deleted: true })
@@ -231,7 +278,8 @@ describe('TodoStore', () => {
     if (status !== 'pending') todos.beginRun(created.id, 'run-1', 'session-1')
     if (status === 'blocked') todos.block({ id: created.id, question: '请选择' }, 'session-1')
     if (status === 'in_review') todos.submitReview({ id: created.id, summary: '已验证' }, 'session-1')
-    const before = todos.archive(created.id)
+    if (status === 'in_progress' || status === 'blocked') todos.stopExecution(created.id)
+    const before = todos.get(created.id)
     const completed = todos.approve(created.id)
     expect(completed).toMatchObject({
       status: 'completed', completedAt: expect.any(String), blockedReason: null, activeRunId: null,
@@ -242,24 +290,26 @@ describe('TodoStore', () => {
     const detail = todos.detail(created.id)
     expect(detail.events[0]).toMatchObject({
       type: status === 'in_review' ? 'review_approved' : 'updated',
-      message: status === 'in_review' ? null : '用户标记完成',
+      message: status === 'in_review' ? null : '用户将任务标为已完成',
     })
     if (status === 'pending') expect(detail.runs).toEqual([])
     else expect(detail.runs[0]).toMatchObject({ status: status === 'in_review' ? 'submitted' : 'cancelled', finishedAt: expect.any(String) })
-    expect(() => todos.approve(created.id)).toThrow('cannot be completed while completed')
+    expect(todos.approve(created.id)).toEqual(completed)
     expect(() => todos.progress(created.id, 'session-1', '迟到的进度')).toThrow('must be in_progress')
     expect(() => todos.block({ id: created.id, question: '迟到的问题' }, 'session-1')).toThrow('must be in_progress')
     expect(() => todos.submitReview({ id: created.id, summary: '迟到的结果' }, 'session-1')).toThrow('must be in_progress')
     expect(todos.detail(created.id)).toEqual(detail)
+    todos.archive(created.id)
+    const archived = todos.detail(created.id)
     todos.close()
     const reopened = new TodoStore({ ...CONFIG, databasePath })
     openStores.push(reopened)
-    expect(reopened.detail(created.id)).toEqual(detail)
+    expect(reopened.detail(created.id)).toEqual(archived)
     reopened.restore(created.id)
     expect(reopened.list({ statuses: ['completed'] }).todos).toHaveLength(1)
   })
 
-  it('拒绝持久化的 cancelled 状态且不写入完成活动', () => {
+  it('已取消任务可手动重新打开，不启动 Agent', () => {
     const directory = mkdtempSync(join(tmpdir(), 'todo-complete-'))
     completionDirectories.push(directory)
     const databasePath = join(directory, 'todos.sqlite')
@@ -271,20 +321,19 @@ describe('TodoStore', () => {
     } finally {
       database.close()
     }
-    const before = todos.detail(created.id)
-    expect(() => todos.approve(created.id)).toThrow('cannot be completed while cancelled')
-    expect(todos.detail(created.id)).toEqual(before)
+    expect(todos.setStatus(created.id, 'pending')).toMatchObject({ status: 'pending', executionStatus: null, activeRunId: null })
+    expect(todos.recoverableTodos()).toEqual([])
   })
 
   it('rejects invalid lifecycle transitions and Agent Sessions that do not own the todo', () => {
     const todos = store()
     const created = todos.create({ title: 'Owned task' })
-    expect(() => todos.requestChanges({ id: created.id, feedback: '调整' }, 'run-2')).toThrow('must be in_review')
+    expect(() => todos.requestChanges({ id: created.id, feedback: '调整' }, 'run-2')).toThrow('must be in_progress')
     todos.beginRun(created.id, 'run-1', 'session-1')
     expect(() => todos.delete(created.id)).toThrow('cannot be deleted while in_progress')
     expect(() => todos.progress(created.id, 'other-session', 'spoofed')).toThrow('does not own')
     expect(() => todos.submitReview({ id: created.id, summary: 'spoofed' }, 'other-session')).toThrow('does not own')
-    expect(() => todos.beginRun(created.id, 'run-2', 'session-1')).toThrow('must be pending')
+    expect(() => todos.beginRun(created.id, 'run-2', 'session-1')).toThrow('请先处理')
   })
 
   it('retains a failed run and allows a pending retry in the same primary Session', () => {
@@ -292,7 +341,7 @@ describe('TodoStore', () => {
     const created = todos.create({ title: 'Retry' })
     todos.beginRun(created.id, 'run-1', 'session-1')
     expect(todos.failRun(created.id, 'run-1', 'provider unavailable')).toMatchObject({
-      status: 'pending', activeRunId: null, primarySessionId: 'session-1', latestSummary: 'provider unavailable',
+      status: 'in_progress', executionStatus: 'failed', activeRunId: null, primarySessionId: 'session-1', latestSummary: 'provider unavailable',
     })
     todos.beginRun(created.id, 'run-2', 'session-1')
     expect(todos.detail(created.id).runs.map(run => [run.sequence, run.status])).toEqual([[2, 'running'], [1, 'failed']])
@@ -311,7 +360,8 @@ describe('TodoStore', () => {
     todos.submitReview({ id: reviewed.id, summary: 'Ready' }, 'session-reviewed')
 
     expect(todos.list({ tags: ['work'] }).todos.map(todo => todo.id)).toEqual(['reviewed', 'blocked', 'working', 'pending'])
-    expect(todos.list({ statuses: ['blocked'], tags: ['INPUT'] }).todos.map(todo => todo.id)).toEqual(['blocked'])
+    expect(todos.list({ needsAttention: true, tags: ['INPUT'] }).todos.map(todo => todo.id)).toEqual(['blocked'])
+    expect(todos.list({ needsAttention: true })).toMatchObject({ total: 2, counts: { inProgress: 3, needsAttention: 2 } })
     expect(todos.list({ search: 'alice' }).todos.map(todo => todo.id)).toEqual(['blocked', 'pending'])
     expect(todos.update(working.id, { notes: '  updated  ', assignee: null, priority: 'medium', tags: [] })).toMatchObject({
       status: 'in_progress', notes: 'updated', assignee: null, priority: 'medium', tags: [], revision: 2,

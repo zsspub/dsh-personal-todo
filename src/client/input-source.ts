@@ -3,14 +3,13 @@ import type { ListTodoInput, TodoDetail, TodoListResult } from '../types.ts'
 import type { PersonalTodoKey } from './locales.ts'
 
 export const TODO_SOURCE = 'personal-todo'
-const categories = ['pending', 'in_progress', 'blocked', 'in_review'] as const
+const categories = ['pending', 'in_progress'] as const
 type Category = (typeof categories)[number]
 const statusKeys = {
-  pending: 'status.pending', in_progress: 'status.inProgress', blocked: 'status.blocked',
-  in_review: 'status.inReview',
+  pending: 'status.pending', in_progress: 'status.inProgress',
 } as const
 const countKeys = {
-  pending: 'pending', in_progress: 'inProgress', blocked: 'blocked', in_review: 'inReview',
+  pending: 'pending', in_progress: 'inProgress',
 } as const
 
 interface TodoInputApi {
@@ -92,7 +91,7 @@ export function createTodoInputSource(api: TodoInputApi, t: (key: PersonalTodoKe
         signal.throwIfAborted()
         const { todo } = await api.get(ref, signal)
         signal.throwIfAborted()
-        return `Personal todo reference (personalTodo.get):\n${JSON.stringify(todo, null, 2)}`
+        return `个人待办引用（personalTodo.get）：\n${JSON.stringify(todo, null, 2)}`
       },
     },
   }

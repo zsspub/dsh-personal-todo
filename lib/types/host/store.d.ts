@@ -1,6 +1,6 @@
 /** 负责个人待办校验、排序和持久化写入的 SQLite 存储层。 */
-import type { BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ExportTodoDataResult, ImportTodoDataResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoListResult, TodoSession, UpdateTodoPatch } from '../types.ts';
-export declare const PERSONAL_TODO_SCHEMA_VERSION = 5;
+import type { BlockTodoRequest, CreateTodoInput, DeleteTodoResult, ExportTodoDataResult, ImportTodoDataResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoListResult, TodoSession, TodoStatus, UpdateTodoPatch } from '../types.ts';
+export declare const PERSONAL_TODO_SCHEMA_VERSION = 6;
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist';
 export interface TodoStoreConfig {
     readonly databasePath: string;
@@ -34,6 +34,7 @@ export declare class TodoStore {
     private migrateV3;
     private migrateV4;
     private assertOpen;
+    private migrateV5;
     private transaction;
     private tagsFor;
     private todoFromRow;
@@ -44,6 +45,7 @@ export declare class TodoStore {
     private requireRow;
     private requireStatus;
     private requireOwnedRun;
+    private requireRunStatus;
     private appendEvent;
     /** 返回待办快照；标识符不存在时抛出错误。 */
     get(id: string): Todo;
@@ -62,7 +64,7 @@ export declare class TodoStore {
     linkRelatedSession(parentSessionId: string, sessionId: string): TodoSession | undefined;
     /** 返回服务启动后需要在原根会话中恢复的执行中待办。 */
     recoverableTodos(): Todo[];
-    /** 将初始派发失败的待办恢复为待处理，并保留审计记录。 */
+    /** 保留失败轮次与任务进度，允许用户重试或接手。 */
     failRun(id: string, runId: string, message: string): Todo;
     /** 记录待办主 Agent 会话汇报的进度。 */
     progress(id: string, sessionId: string, message: string): Todo;
@@ -72,8 +74,10 @@ export declare class TodoStore {
     reply(request: ReplyTodoRequest): Todo;
     /** 提交 Agent 结果，等待用户明确审核。 */
     submitReview(request: SubmitTodoReviewRequest, sessionId: string): Todo;
-    /** 用户完成待处理、执行中、阻塞或待审核的待办；保留历史，不中断 Agent。 */
+    /** 持久化用户完成操作；调用方须先协调停止实际 Agent。 */
     approve(id: string): Todo;
+    setStatus(id: string, status: TodoStatus): Todo;
+    stopExecution(id: string, message?: string): Todo;
     /** 在原主会话中创建新一轮执行，处理用户修改意见。 */
     requestChanges(request: RequestTodoChangesRequest, runId: string): Todo;
     /** 永久删除待办及其关联记录。 */

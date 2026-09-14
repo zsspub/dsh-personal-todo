@@ -5,6 +5,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import PersonalTodoService from '../src/index.ts'
 import { TodoStore } from '../src/host/store.ts'
+import type { TodoAgent } from '../src/host/orchestrator.ts'
 import { apply as applyTools } from '../src/tools.ts'
 import type { CreateTodoInput, ListTodoInput, UpdateTodoRequest } from '../src/types.ts'
 
@@ -30,6 +31,7 @@ class SessionControllerStub extends Service {
   readonly resolved: string[] = []
   readonly messages: Array<{ readonly sessionId: string; readonly text: string }> = []
   agentStatus: 'idle' | 'running' = 'idle'
+  readonly agents = new Map<string, TodoAgent & { finish(): void }>()
 
   constructor(ctx: Context) {
     super(ctx, 'sessionController')
@@ -40,18 +42,30 @@ class SessionControllerStub extends Service {
     return Promise.resolve({ sessionId: request.sessionId })
   }
 
-  resolveAgent(sessionId: string): Promise<{ readonly agent: {
-    readonly id: string
-    followup(message: { readonly content: readonly [{ readonly text: string }] }): void
-  } }> {
+  resolveAgent(sessionId: string): Promise<{ readonly agent: TodoAgent }> {
     this.resolved.push(sessionId)
-    return Promise.resolve({
-      agent: {
+    if (!this.agents.has(sessionId)) {
+      let status = this.agentStatus
+      const waiters: Array<() => void> = []
+      const finish = () => { status = 'idle'; for (const resolve of waiters.splice(0)) resolve() }
+      this.agents.set(sessionId, {
         id: sessionId,
-        status: this.agentStatus,
-        followup: message => { this.messages.push({ sessionId, text: message.content[0].text }) },
-      },
-    })
+        get status() { return status },
+        cancel: vi.fn(finish),
+        finish,
+        whenIdle: () => status === 'idle' ? Promise.resolve() : new Promise(resolve => { waiters.push(resolve) }),
+        followup: message => { status = 'running'; this.messages.push({ sessionId, text: message.content[0].text }) },
+      })
+    }
+    return Promise.resolve({ agent: this.agents.get(sessionId)! })
+  }
+}
+
+class AgentsStub extends Service {
+  static inject = ['sessionController']
+  constructor(ctx: Context) { super(ctx, 'agents') }
+  get(id: string) {
+    return (this.ctx.sessionController as SessionControllerStub).agents.get(id)
   }
 }
 
@@ -74,6 +88,7 @@ async function setup(
   await ctx.plugin(SessionControllerStub)
   const sessionController = ctx.sessionController as unknown as SessionControllerStub
   sessionController.agentStatus = agentStatus
+  await ctx.plugin(AgentsStub)
   await ctx.plugin(SessionsStub)
   await ctx.plugin(PersonalTodoService, {
     databasePath,
@@ -115,6 +130,159 @@ afterEach(async () => {
 })
 
 describe('Host Remote service and Agent tools', () => {
+  it('人工开始、完成、重开和取消均不创建或恢复会话', async () => {
+    const { ctx, sessions, tools } = await setup()
+    const todo = await ctx.personalTodo.create({ title: '下班取快递' }, signal)
+    for (const status of ['in_progress', 'completed', 'pending', 'cancelled', 'pending'] as const) {
+      expect(await ctx.personalTodo.setStatus({ id: todo.id, status }, signal)).toMatchObject({
+        status, activeRunId: null, primarySessionId: null, executionStatus: null,
+      })
+    }
+    expect(sessions.created).toEqual([])
+    expect(sessions.resolved).toEqual([])
+    expect(sessions.messages).toEqual([])
+    expect(tools.get('personal_todo_list')!.output.schema).toMatchObject({
+      properties: { todos: { items: { properties: { executionStatus: expect.any(Object) } } } },
+    })
+  })
+
+  it('停止并接手会取消主会话及嵌套 Agent，保留任务进度和历史', async () => {
+    const { ctx, sessions } = await setup()
+    const todo = await ctx.personalTodo.create({ title: '修改插件' }, signal)
+    const started = await ctx.personalTodo.start({ id: todo.id }, signal)
+    ctx.emit('session/created', { id: 'child', header: { parentSession: started.primarySessionId } } as never)
+    ctx.emit('session/created', { id: 'nested', header: { parentSession: 'child' } } as never)
+    sessions.agentStatus = 'running'
+    await sessions.resolveAgent('child')
+    await sessions.resolveAgent('nested')
+    const messages = sessions.messages.length
+    expect(await ctx.personalTodo.stop({ id: todo.id }, signal)).toMatchObject({
+      status: 'in_progress', executionStatus: 'stopped', activeRunId: null, primarySessionId: started.primarySessionId,
+    })
+    for (const agent of sessions.agents.values()) {
+      expect(agent.cancel).toHaveBeenCalledOnce()
+      expect(agent.status).toBe('idle')
+    }
+    expect(sessions.messages).toHaveLength(messages)
+    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).runs[0]).toMatchObject({
+      status: 'cancelled', finishedAt: expect.any(String),
+    })
+    expect(await ctx.personalTodo.start({ id: todo.id }, signal)).toMatchObject({
+      status: 'in_progress', executionStatus: 'running', primarySessionId: started.primarySessionId,
+    })
+  })
+
+  it('停止失败保留任务、Run 和历史，不接受并发状态操作', async () => {
+    const { ctx, sessions } = await setup()
+    const todo = await ctx.personalTodo.create({ title: '停止失败' }, signal)
+    const started = await ctx.personalTodo.start({ id: todo.id }, signal)
+    const agent = sessions.agents.get(started.primarySessionId!)!
+    const before = await ctx.personalTodo.get({ id: todo.id }, signal)
+    vi.mocked(agent.cancel).mockImplementation(() => { throw new Error('取消失败') })
+    await expect(ctx.personalTodo.setStatus({ id: todo.id, status: 'completed' }, signal)).rejects.toThrow('取消失败')
+    expect(await ctx.personalTodo.get({ id: todo.id }, signal)).toEqual(before)
+    vi.mocked(agent.cancel).mockImplementation(() => undefined)
+    const stopping = ctx.personalTodo.stop({ id: todo.id }, signal)
+    await expect(ctx.personalTodo.start({ id: todo.id }, signal)).rejects.toThrow('正在切换')
+    await expect(ctx.personalTodo.archive({ id: todo.id }, signal)).rejects.toThrow('正在切换')
+    expect(() => ctx.personalTodo.submitReview({ id: todo.id, summary: '迟到结果' }, agent.id)).toThrow('正在切换')
+    agent.finish()
+    await stopping
+  })
+
+  it('停止超时不修改任务进度或记录', async () => {
+    vi.useFakeTimers()
+    try {
+      const { ctx, sessions } = await setup()
+      const todo = await ctx.personalTodo.create({ title: '等待取消' }, signal)
+      const started = await ctx.personalTodo.start({ id: todo.id }, signal)
+      const agent = sessions.agents.get(started.primarySessionId!)!
+      vi.mocked(agent.cancel).mockImplementation(() => undefined)
+      const before = await ctx.personalTodo.get({ id: todo.id }, signal)
+      const stopping = expect(ctx.personalTodo.archive({ id: todo.id }, signal)).rejects.toThrow('未能确认 Agent 已停止')
+      await vi.advanceTimersByTimeAsync(15_000)
+      await stopping
+      expect(await ctx.personalTodo.get({ id: todo.id }, signal)).toEqual(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('主 Agent 已停止但子 Agent 取消失败时，不被空闲回调改写 Run', async () => {
+    const { ctx, sessions } = await setup()
+    const todo = await ctx.personalTodo.create({ title: '部分取消失败' }, signal)
+    const started = await ctx.personalTodo.start({ id: todo.id }, signal)
+    ctx.emit('session/created', { id: 'child-fails', header: { parentSession: started.primarySessionId } } as never)
+    sessions.agentStatus = 'running'
+    const { agent: child } = await sessions.resolveAgent('child-fails')
+    vi.mocked(child.cancel).mockImplementation(() => { throw new Error('子 Agent 取消失败') })
+    const before = await ctx.personalTodo.get({ id: todo.id }, signal)
+    await expect(ctx.personalTodo.approve({ id: todo.id }, signal)).rejects.toThrow('子 Agent 取消失败')
+    await Promise.resolve()
+    expect(await ctx.personalTodo.get({ id: todo.id }, signal)).toEqual(before)
+    expect(sessions.agents.get(started.primarySessionId!)!.status).toBe('idle')
+  })
+
+  it('取消期间发现的新子 Agent 也必须停止后才能完成任务', async () => {
+    const { ctx, sessions } = await setup()
+    const todo = await ctx.personalTodo.create({ title: '取消期间派生' }, signal)
+    const started = await ctx.personalTodo.start({ id: todo.id }, signal)
+    const root = sessions.agents.get(started.primarySessionId!)!
+    vi.mocked(root.cancel).mockImplementation(() => {
+      root.finish()
+      ctx.emit('session/created', { id: 'late-child', header: { parentSession: root.id } } as never)
+      sessions.agentStatus = 'running'
+      void sessions.resolveAgent('late-child')
+    })
+    await ctx.personalTodo.approve({ id: todo.id }, signal)
+    expect(sessions.agents.get('late-child')!.cancel).toHaveBeenCalledOnce()
+    expect(sessions.agents.get('late-child')!.status).toBe('idle')
+  })
+
+  it('Agent 未提交结果就结束时显示停止，不伪装为完成或继续运行', async () => {
+    const { ctx, sessions } = await setup()
+    const todo = await ctx.personalTodo.create({ title: '意外结束' }, signal)
+    const started = await ctx.personalTodo.start({ id: todo.id }, signal)
+    sessions.agents.get(started.primarySessionId!)!.finish()
+    await vi.waitFor(async () => {
+      expect((await ctx.personalTodo.get({ id: todo.id }, signal)).todo).toMatchObject({
+        status: 'in_progress', executionStatus: 'stopped', activeRunId: null, completedAt: null,
+      })
+    })
+  })
+
+  it('派发立即结束也能结算执行状态，派发失败允许用户手动接手', async () => {
+    const { ctx, sessions } = await setup()
+    const immediate = await ctx.personalTodo.create({ title: '立即结束' }, signal)
+    const resolved = await sessions.resolveAgent(`personal-todo-${immediate.id}`)
+    vi.spyOn(resolved.agent, 'followup').mockImplementation(() => undefined)
+    expect(await ctx.personalTodo.start({ id: immediate.id }, signal)).toMatchObject({ executionStatus: 'stopped', activeRunId: null })
+    expect((await ctx.personalTodo.get({ id: immediate.id }, signal)).todo.executionStatus).toBe('stopped')
+    const failed = await ctx.personalTodo.create({ title: '派发失败' }, signal)
+    vi.spyOn(sessions, 'create').mockRejectedValueOnce(new Error('服务不可用'))
+    await expect(ctx.personalTodo.start({ id: failed.id }, signal)).rejects.toThrow('服务不可用')
+    expect((await ctx.personalTodo.get({ id: failed.id }, signal)).todo).toMatchObject({
+      status: 'in_progress', executionStatus: 'failed', activeRunId: null,
+    })
+    expect(await ctx.personalTodo.approve({ id: failed.id }, signal)).toMatchObject({ status: 'completed' })
+  })
+
+  it('手动进行中和已停止任务在重启时不恢复执行', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'todo-manual-restart-'))
+    temporaryDirectories.push(directory)
+    const path = join(directory, 'todos.sqlite3')
+    const first = await setup(path)
+    const manual = await first.ctx.personalTodo.create({ title: '自己处理' }, signal)
+    await first.ctx.personalTodo.setStatus({ id: manual.id, status: 'in_progress' }, signal)
+    const stopped = await first.ctx.personalTodo.create({ title: '接手处理' }, signal)
+    await first.ctx.personalTodo.start({ id: stopped.id }, signal)
+    await first.ctx.personalTodo.stop({ id: stopped.id }, signal)
+    await first.ctx.fiber.dispose()
+    const reopened = await setup(path)
+    expect(reopened.sessions.resolved).toEqual([])
+    expect(reopened.sessions.messages).toEqual([])
+  })
+
   it('publishes CRUD plus Agent-owned progress, blocking, and review tools', async () => {
     const { tools, guard, inject } = await setup()
     expect(guard).not.toHaveBeenCalled()
@@ -208,7 +376,7 @@ describe('Host Remote service and Agent tools', () => {
       summary: 'Ready for review',
       verification: 'Tests passed',
       risk: null,
-    }, agentRun)).toMatchObject({ status: 'in_review' })
+    }, agentRun)).toMatchObject({ status: 'in_progress', executionStatus: 'submitted' })
     expect(agentRun.concludeTurn).not.toHaveBeenCalled()
 
     expect(await ctx.personalTodo.approve({ id: added.id }, signal)).toMatchObject({ status: 'completed' })
@@ -298,7 +466,7 @@ describe('Host Remote service and Agent tools', () => {
     const agentRun = run(started.primarySessionId as string)
 
     expect(await tools.get('personal_todo_block')?.execute({ id: todo.id, question: 'Which option?' }, agentRun)).toMatchObject({
-      status: 'blocked', blockedReason: 'Which option?',
+      status: 'in_progress', executionStatus: 'waiting_input', blockedReason: 'Which option?',
     })
     expect(agentRun.concludeTurn).not.toHaveBeenCalled()
     expect(await ctx.personalTodo.reply({ id: todo.id, message: 'Use option A.' }, signal)).toMatchObject({ status: 'in_progress' })

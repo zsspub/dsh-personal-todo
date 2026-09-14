@@ -1,7 +1,7 @@
 /** Host 服务、Agent 工具和 Web 客户端共用的 JSON 可序列化类型契约。 */
 
 export const TODO_STATUSES = [
-  'pending', 'in_progress', 'blocked', 'in_review', 'completed', 'cancelled',
+  'pending', 'in_progress', 'completed', 'cancelled',
 ] as const
 export const TODO_PRIORITIES = ['none', 'low', 'medium', 'high'] as const
 export const TODO_RUN_STATUSES = ['running', 'waiting_input', 'submitted', 'failed', 'cancelled'] as const
@@ -15,6 +15,7 @@ export type TodoStatus = (typeof TODO_STATUSES)[number]
 export type TodoPriority = (typeof TODO_PRIORITIES)[number]
 export type TodoRunStatus = (typeof TODO_RUN_STATUSES)[number]
 export type TodoEventType = (typeof TODO_EVENT_TYPES)[number]
+export type TodoExecutionStatus = 'running' | 'waiting_input' | 'submitted' | 'failed' | 'stopped'
 
 /** 一条持久化个人待办；时间戳采用标准 RFC 3339 UTC 字符串。 */
 export interface Todo {
@@ -23,6 +24,7 @@ export interface Todo {
   readonly notes: string | null
   readonly assignee: string | null
   readonly status: TodoStatus
+  readonly executionStatus: TodoExecutionStatus | null
   readonly priority: TodoPriority
   readonly dueAt: string | null
   readonly tags: string[]
@@ -110,6 +112,10 @@ export interface TodoIdRequest {
   readonly id: string
 }
 
+export interface SetTodoStatusRequest extends TodoIdRequest {
+  readonly status: TodoStatus
+}
+
 /** 通过不透明标识符删除待办。 */
 export type DeleteTodoRequest = TodoIdRequest
 
@@ -151,14 +157,14 @@ export interface ListTodoInput {
   readonly offset?: number
   /** 为 true 时返回归档待办，否则排除归档待办。 */
   readonly archived?: boolean
+  readonly needsAttention?: boolean
 }
 
 /** 整个数据库的状态计数，不受列表筛选条件影响。 */
 export interface TodoCounts {
   readonly pending: number
   readonly inProgress: number
-  readonly blocked: number
-  readonly inReview: number
+  readonly needsAttention: number
   readonly completed: number
   readonly cancelled: number
   readonly archived: number
@@ -180,7 +186,7 @@ export interface DeleteTodoResult {
 
 export interface TodoBackup {
   readonly format: 'dsh-personal-todo'
-  readonly version: 1
+  readonly version: 2
   readonly exportedAt: string
   readonly todos: TodoDetail[]
 }

@@ -4,7 +4,7 @@ import z from '@deepseek-ai/schemastery';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { type TodoSessionController } from './host/orchestrator.ts';
 import { type JournalMode } from './host/store.ts';
-import type { BlockTodoRequest, CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, ReportTodoProgressRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult } from './types.ts';
+import type { BlockTodoRequest, CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, ReportTodoProgressRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, SetTodoStatusRequest } from './types.ts';
 export type * from './types.ts';
 export { PERSONAL_TODO_SCHEMA_VERSION, PersonalTodoError, TodoStore } from './host/store.ts';
 export type { JournalMode, TodoStoreConfig } from './host/store.ts';
@@ -55,8 +55,10 @@ export declare class PersonalTodoService extends TypertRemoteService {
     start(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
     /** 使用用户回复继续执行被阻塞的待办。 */
     reply(request: ReplyTodoRequest, signal: AbortSignal): Promise<Todo>;
-    /** 用户完成待处理、执行中、阻塞或待审核的待办；保留历史，不中断 Agent。 */
+    /** 用户确认完成任务；先停止活动执行并保留历史。 */
     approve(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
+    setStatus(request: SetTodoStatusRequest, signal: AbortSignal): Promise<Todo>;
+    stop(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
     /** 归档待办，不改变其生命周期状态。 */
     archive(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
     /** 将归档待办恢复到对应生命周期列表。 */

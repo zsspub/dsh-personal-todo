@@ -91,6 +91,16 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         if (!result.ok) throw remoteFailure(result)
         return result.value
       },
+      setStatus: async (request, signal) => {
+        const result = await scope.remote.personalTodo.setStatus(request, signal)
+        if (!result.ok) throw remoteFailure(result)
+        return result.value
+      },
+      stop: async (id, signal) => {
+        const result = await scope.remote.personalTodo.stop({ id }, signal)
+        if (!result.ok) throw remoteFailure(result)
+        return result.value
+      },
       reply: async (request, signal) => {
         const result = await scope.remote.personalTodo.reply(request, signal)
         if (!result.ok) throw remoteFailure(result)

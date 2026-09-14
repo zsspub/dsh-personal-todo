@@ -13,7 +13,7 @@ import type {
 } from '../types.ts'
 import { TODO_PRIORITIES, TODO_STATUSES } from '../types.ts'
 
-export const PERSONAL_TODO_SCHEMA_VERSION = 5
+export const PERSONAL_TODO_SCHEMA_VERSION = 6
 
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 
@@ -242,7 +242,11 @@ export class TodoStore {
       this.migrateV3()
       version = 4
     }
-    if (version === 4) this.migrateV4()
+    if (version === 4) {
+      this.migrateV4()
+      version = 5
+    }
+    if (version === 5) this.migrateV5()
   }
 
   private createSchema(): void {
@@ -253,7 +257,7 @@ export class TodoStore {
           title              TEXT NOT NULL,
           notes              TEXT,
           assignee           TEXT,
-          status             TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'blocked', 'in_review', 'completed', 'cancelled')),
+          status             TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed', 'cancelled')),
           priority           TEXT NOT NULL CHECK (priority IN ('none', 'low', 'medium', 'high')),
           due_at             INTEGER,
           primary_session_id TEXT,
@@ -307,7 +311,7 @@ export class TodoStore {
         CREATE INDEX todo_tags_tag_idx ON todo_tags(tag, todo_id);
         CREATE INDEX todo_runs_todo_idx ON todo_runs(todo_id, sequence DESC);
         CREATE INDEX todo_events_todo_idx ON todo_events(todo_id, created_at DESC);
-        PRAGMA user_version = 5;
+        PRAGMA user_version = 6;
       `)
     })
   }
@@ -438,6 +442,40 @@ export class TodoStore {
     if (this.closed) throw new PersonalTodoError('personal todo database is closed')
   }
 
+  private migrateV5(): void {
+    this.database.exec('PRAGMA foreign_keys = OFF')
+    try {
+      this.transaction(() => {
+        this.database.exec(`
+          CREATE TABLE todos_v6 (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, notes TEXT, assignee TEXT,
+            status TEXT NOT NULL CHECK (status IN ('pending', 'in_progress', 'completed', 'cancelled')),
+            priority TEXT NOT NULL CHECK (priority IN ('none', 'low', 'medium', 'high')),
+            due_at INTEGER, primary_session_id TEXT, active_run_id TEXT, latest_summary TEXT,
+            blocked_reason TEXT, review_round INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER, archived_at INTEGER
+          ) STRICT;
+          INSERT INTO todos_v6
+            SELECT id, title, notes, assignee,
+              CASE WHEN status IN ('blocked', 'in_review') THEN 'in_progress' ELSE status END,
+              priority, due_at, primary_session_id, active_run_id, latest_summary, blocked_reason,
+              review_round, revision, created_at, updated_at, completed_at, archived_at FROM todos;
+          DROP TABLE todos;
+          ALTER TABLE todos_v6 RENAME TO todos;
+          CREATE INDEX todos_status_due_idx ON todos(status, due_at);
+          CREATE INDEX todos_completed_idx ON todos(completed_at DESC);
+          CREATE INDEX todos_archived_idx ON todos(archived_at DESC);
+          PRAGMA user_version = 6;
+        `)
+        if (this.database.prepare('PRAGMA foreign_key_check').all().length !== 0) {
+          throw new PersonalTodoError('任务状态迁移失败：关联记录不完整。')
+        }
+      })
+    } finally {
+      this.database.exec('PRAGMA foreign_keys = ON')
+    }
+  }
+
   private transaction<T>(operation: () => T): T {
     this.database.exec('BEGIN IMMEDIATE')
     try {
@@ -460,12 +498,16 @@ export class TodoStore {
   }
 
   private todoFromRow(row: TodoRow): Todo {
+    const run = this.database.prepare(`
+      SELECT status FROM todo_runs WHERE todo_id = ? ORDER BY sequence DESC LIMIT 1
+    `).get(row.id) as { status: TodoRunStatus } | undefined
     return {
       id: row.id,
       title: row.title,
       notes: row.notes,
       assignee: row.assignee,
       status: row.status,
+      executionStatus: run === undefined ? null : run.status === 'cancelled' ? 'stopped' : run.status,
       priority: row.priority,
       dueAt: iso(row.due_at),
       tags: this.tagsFor(row.id),
@@ -546,6 +588,13 @@ export class TodoStore {
     return row.active_run_id
   }
 
+  private requireRunStatus(row: TodoRow, status: TodoRunStatus): string {
+    this.requireStatus(row, 'in_progress')
+    const run = this.database.prepare('SELECT status FROM todo_runs WHERE id = ?').get(row.active_run_id ?? '') as { status: TodoRunStatus } | undefined
+    if (run?.status !== status) throw new PersonalTodoError(`待办 ${row.id} 的 Agent 执行状态必须为 ${status}。`)
+    return row.active_run_id as string
+  }
+
   private appendEvent(
     todoId: string,
     runId: string | null,
@@ -600,7 +649,7 @@ export class TodoStore {
       const rows = this.database.prepare('SELECT id FROM todos ORDER BY created_at, id').all() as { id: string }[]
       return {
         format: 'dsh-personal-todo',
-        version: 1,
+        version: 2,
         exportedAt: new Date(this.now()).toISOString(),
         todos: rows.map(row => this.readDetail(row.id, true)),
       }
@@ -640,7 +689,7 @@ export class TodoStore {
               }
             }
           }
-          const reset = todo.status === 'in_progress'
+          const reset = todo.executionStatus === 'running'
           const timestamp = this.now()
           const time = (value: string | null): number | null => value === null ? null : Date.parse(value)
           this.database.prepare(`
@@ -768,7 +817,9 @@ export class TodoStore {
   beginRun(id: string, runId: string, sessionId: string): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
-    this.requireStatus(current, 'pending')
+    if (current.status !== 'pending' && current.status !== 'in_progress') throw new PersonalTodoError('只有未完成任务可以交给 Agent。')
+    if (current.archived_at !== null) throw new PersonalTodoError('请先恢复归档任务。')
+    if (current.active_run_id !== null) throw new PersonalTodoError('请先处理当前 Agent 执行或结果。')
     const timestamp = this.now()
     const sequenceRow = this.database.prepare(`
       SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM todo_runs WHERE todo_id = ?
@@ -833,13 +884,14 @@ export class TodoStore {
              active_run_id, latest_summary, blocked_reason, review_round, revision,
              created_at, updated_at, completed_at, archived_at
       FROM todos
-      WHERE status = 'in_progress' AND primary_session_id IS NOT NULL AND active_run_id IS NOT NULL
+      WHERE status = 'in_progress' AND archived_at IS NULL AND primary_session_id IS NOT NULL
+        AND active_run_id IN (SELECT id FROM todo_runs WHERE status = 'running')
       ORDER BY created_at ASC, id ASC
     `).all() as unknown as TodoRow[]
     return rows.map(row => this.todoFromRow(row))
   }
 
-  /** 将初始派发失败的待办恢复为待处理，并保留审计记录。 */
+  /** 保留失败轮次与任务进度，允许用户重试或接手。 */
   failRun(id: string, runId: string, message: string): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
@@ -849,7 +901,7 @@ export class TodoStore {
     this.transaction(() => {
       this.database.prepare(`UPDATE todo_runs SET status = 'failed', finished_at = ? WHERE id = ?`).run(timestamp, runId)
       this.database.prepare(`
-        UPDATE todos SET status = 'pending', active_run_id = NULL, latest_summary = ?,
+        UPDATE todos SET active_run_id = NULL, blocked_reason = NULL, latest_summary = ?,
           revision = revision + 1, updated_at = ? WHERE id = ?
       `).run(normalized, timestamp, id)
       this.appendEvent(id, runId, 'run_failed', normalized, timestamp)
@@ -863,6 +915,7 @@ export class TodoStore {
     const current = this.requireRow(id)
     this.requireStatus(current, 'in_progress')
     const runId = this.requireOwnedRun(current, sessionId)
+    this.requireRunStatus(current, 'running')
     const normalized = normalizeRequiredText('progress message', message, 2_000)
     const timestamp = this.now()
     this.transaction(() => {
@@ -880,12 +933,13 @@ export class TodoStore {
     const current = this.requireRow(request.id)
     this.requireStatus(current, 'in_progress')
     const runId = this.requireOwnedRun(current, sessionId)
+    this.requireRunStatus(current, 'running')
     const question = normalizeRequiredText('question', request.question)
     const timestamp = this.now()
     this.transaction(() => {
       this.database.prepare(`UPDATE todo_runs SET status = 'waiting_input' WHERE id = ?`).run(runId)
       this.database.prepare(`
-        UPDATE todos SET status = 'blocked', blocked_reason = ?, latest_summary = ?,
+        UPDATE todos SET blocked_reason = ?, latest_summary = ?,
           revision = revision + 1, updated_at = ? WHERE id = ?
       `).run(question, question, timestamp, request.id)
       this.appendEvent(request.id, runId, 'blocked', question, timestamp)
@@ -897,7 +951,7 @@ export class TodoStore {
   reply(request: ReplyTodoRequest): Todo {
     this.assertOpen()
     const current = this.requireRow(request.id)
-    this.requireStatus(current, 'blocked')
+    this.requireRunStatus(current, 'waiting_input')
     if (current.active_run_id === null) throw new PersonalTodoError(`todo ${JSON.stringify(request.id)} has no active run`)
     const message = normalizeRequiredText('message', request.message)
     const timestamp = this.now()
@@ -918,6 +972,7 @@ export class TodoStore {
     const current = this.requireRow(request.id)
     this.requireStatus(current, 'in_progress')
     const runId = this.requireOwnedRun(current, sessionId)
+    this.requireRunStatus(current, 'running')
     const summary = normalizeRequiredText('summary', request.summary)
     const verification = normalizeOptionalText('verification', request.verification)
     const risk = normalizeOptionalText('risk', request.risk)
@@ -928,7 +983,7 @@ export class TodoStore {
         WHERE id = ?
       `).run(summary, verification, risk, timestamp, runId)
       this.database.prepare(`
-        UPDATE todos SET status = 'in_review', latest_summary = ?, blocked_reason = NULL,
+        UPDATE todos SET latest_summary = ?, blocked_reason = NULL,
           review_round = review_round + 1, revision = revision + 1, updated_at = ? WHERE id = ?
       `).run(summary, timestamp, request.id)
       this.appendEvent(request.id, runId, 'review_submitted', summary, timestamp)
@@ -936,25 +991,43 @@ export class TodoStore {
     return this.get(request.id)
   }
 
-  /** 用户完成待处理、执行中、阻塞或待审核的待办；保留历史，不中断 Agent。 */
+  /** 持久化用户完成操作；调用方须先协调停止实际 Agent。 */
   approve(id: string): Todo {
+    return this.setStatus(id, 'completed')
+  }
+
+  setStatus(id: string, status: TodoStatus): Todo {
     this.assertOpen()
     const current = this.requireRow(id)
-    if (current.status === 'completed' || current.status === 'cancelled') {
-      throw new PersonalTodoError(`todo ${JSON.stringify(id)} cannot be completed while ${current.status}`)
-    }
+    if (!STATUS_SET.has(status)) throw new PersonalTodoError('无效的任务状态。')
+    if (status === current.status) return this.get(id)
+    const run = current.active_run_id === null ? undefined : this.database.prepare('SELECT status FROM todo_runs WHERE id = ?').get(current.active_run_id) as { status: TodoRunStatus } | undefined
+    if (run?.status === 'running' || run?.status === 'waiting_input') throw new PersonalTodoError('请先停止 Agent 执行，再修改任务状态。')
     const timestamp = this.now()
+    const review = status === 'completed' && run?.status === 'submitted'
     this.transaction(() => {
       this.database.prepare(`
-        UPDATE todos SET status = 'completed', active_run_id = NULL, blocked_reason = NULL, completed_at = ?,
+        UPDATE todos SET status = ?, active_run_id = NULL, blocked_reason = NULL, completed_at = ?,
           revision = revision + 1, updated_at = ? WHERE id = ?
-      `).run(timestamp, timestamp, id)
-      this.database.prepare(`
-        UPDATE todo_runs SET status = 'cancelled', finished_at = ?
-        WHERE id = ? AND status IN ('running', 'waiting_input')
-      `).run(timestamp, current.active_run_id)
-      this.appendEvent(id, current.active_run_id, current.status === 'in_review' ? 'review_approved' : 'updated',
-        current.status === 'in_review' ? null : '用户标记完成', timestamp)
+      `).run(status, status === 'completed' ? timestamp : null, timestamp, id)
+      const labels = { pending: '待办', in_progress: '进行中', completed: '已完成', cancelled: '已取消' }
+      this.appendEvent(id, current.active_run_id, review ? 'review_approved' : status === 'cancelled' ? 'cancelled' : 'updated',
+        review ? null : `用户将任务标为${labels[status]}`, timestamp)
+    })
+    return this.get(id)
+  }
+
+  stopExecution(id: string, message = 'Agent 执行已停止，任务可由用户继续处理。'): Todo {
+    this.assertOpen()
+    const current = this.requireRow(id)
+    if (current.active_run_id === null) return this.get(id)
+    const timestamp = this.now()
+    this.transaction(() => {
+      this.database.prepare("UPDATE todo_runs SET status = 'cancelled', finished_at = ? WHERE id = ? AND status IN ('running', 'waiting_input')")
+        .run(timestamp, current.active_run_id)
+      this.database.prepare('UPDATE todos SET active_run_id = NULL, blocked_reason = NULL, revision = revision + 1, updated_at = ? WHERE id = ?')
+        .run(timestamp, id)
+      this.appendEvent(id, current.active_run_id, 'updated', message, timestamp)
     })
     return this.get(id)
   }
@@ -963,7 +1036,7 @@ export class TodoStore {
   requestChanges(request: RequestTodoChangesRequest, runId: string): Todo {
     this.assertOpen()
     const current = this.requireRow(request.id)
-    this.requireStatus(current, 'in_review')
+    this.requireRunStatus(current, 'submitted')
     if (current.primary_session_id === null) {
       throw new PersonalTodoError(`todo ${JSON.stringify(request.id)} has no primary session`)
     }
@@ -1005,6 +1078,7 @@ export class TodoStore {
     this.assertOpen()
     const current = this.requireRow(id)
     if (current.archived_at !== null) throw new PersonalTodoError(`todo ${JSON.stringify(id)} is already archived`)
+    if (current.active_run_id !== null) throw new PersonalTodoError('请先停止或处理 Agent 执行，再归档任务。')
     const timestamp = this.now()
     this.transaction(() => {
       this.database.prepare(`
@@ -1034,7 +1108,7 @@ export class TodoStore {
   list(input: ListTodoInput = {}): TodoListResult {
     this.assertOpen()
     const statuses = input.statuses === undefined
-      ? ['pending', 'in_progress', 'blocked', 'in_review'] satisfies TodoStatus[]
+      ? ['pending', 'in_progress'] satisfies TodoStatus[]
       : this.normalizeEnumFilter('statuses', input.statuses, STATUS_SET) as TodoStatus[]
     const priorities = input.priorities === undefined
       ? undefined
@@ -1057,6 +1131,9 @@ export class TodoStore {
     where.push(input.archived === true ? 't.archived_at IS NOT NULL' : 't.archived_at IS NULL')
     where.push(`t.status IN (${statuses.map(() => '?').join(', ')})`)
     parameters.push(...statuses)
+    if (input.needsAttention === true) {
+      where.push("t.status = 'in_progress' AND t.active_run_id IN (SELECT id FROM todo_runs WHERE status IN ('waiting_input', 'submitted'))")
+    }
     if (priorities !== undefined) {
       where.push(`t.priority IN (${priorities.map(() => '?').join(', ')})`)
       parameters.push(...priorities)
@@ -1083,7 +1160,8 @@ export class TodoStore {
       FROM todos t
       WHERE ${predicate}
       ORDER BY
-        CASE t.status WHEN 'in_review' THEN 0 WHEN 'blocked' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'pending' THEN 3 ELSE 4 END,
+        CASE WHEN t.active_run_id IN (SELECT id FROM todo_runs WHERE status IN ('waiting_input', 'submitted')) THEN 0 ELSE 1 END,
+        CASE t.status WHEN 'in_progress' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
         CASE WHEN t.status = 'completed' THEN t.completed_at END DESC,
         CASE WHEN t.status NOT IN ('completed', 'cancelled') AND t.due_at IS NULL THEN 1 ELSE 0 END,
         CASE WHEN t.status NOT IN ('completed', 'cancelled') THEN t.due_at END ASC,
@@ -1111,7 +1189,7 @@ export class TodoStore {
   }
 
   private counts(): TodoCounts {
-    const counts = { pending: 0, inProgress: 0, blocked: 0, inReview: 0, completed: 0, cancelled: 0, archived: 0 }
+    const counts = { pending: 0, inProgress: 0, needsAttention: 0, completed: 0, cancelled: 0, archived: 0 }
     const rows = this.database.prepare('SELECT status, COUNT(*) AS count FROM todos WHERE archived_at IS NULL GROUP BY status').all() as {
       status: TodoStatus
       count: number
@@ -1119,13 +1197,14 @@ export class TodoStore {
     for (const row of rows) {
       if (row.status === 'pending') counts.pending = row.count
       else if (row.status === 'in_progress') counts.inProgress = row.count
-      else if (row.status === 'blocked') counts.blocked = row.count
-      else if (row.status === 'in_review') counts.inReview = row.count
       else if (row.status === 'completed') counts.completed = row.count
       else counts.cancelled = row.count
     }
     counts.archived = (this.database.prepare(
       'SELECT COUNT(*) AS count FROM todos WHERE archived_at IS NOT NULL',
+    ).get() as { count: number }).count
+    counts.needsAttention = (this.database.prepare(
+      "SELECT COUNT(*) AS count FROM todos WHERE archived_at IS NULL AND status = 'in_progress' AND active_run_id IN (SELECT id FROM todo_runs WHERE status IN ('waiting_input', 'submitted'))",
     ).get() as { count: number }).count
     return counts
   }

@@ -1,0 +1,31 @@
+[
+  {
+    "scene": "待办打开",
+    "pass": true
+  },
+  {
+    "scene": "待办关闭",
+    "pass": true
+  },
+  {
+    "scene": "日历键盘打开",
+    "pass": true
+  },
+  {
+    "scene": "日历Escape关闭",
+    "pass": true,
+    "focus": null
+  },
+  {
+    "scene": "收起侧栏后键盘打开待办",
+    "pass": true
+  },
+  {
+    "scene": "收起侧栏后打开日历",
+    "pass": true
+  },
+  {
+    "scene": "刷新保留入口并移除工作区查看器",
+    "pass": true
+  }
+]

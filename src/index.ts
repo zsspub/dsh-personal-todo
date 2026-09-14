@@ -3,13 +3,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { TodoOrchestrator, type TodoSessionController } from './host/orchestrator.ts'
+import { TodoOrchestrator, type TodoSessionController, type TodoAgentRegistry } from './host/orchestrator.ts'
 import { TodoStore, type JournalMode } from './host/store.ts'
 import type {
   BlockTodoRequest, CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput,
   ReplyTodoRequest, ReportTodoProgressRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest,
   Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest,
   ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult,
+  SetTodoStatusRequest,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -71,7 +72,7 @@ function resolveConfig(config: Config): ResolvedConfig {
 
 /** 生成的 Remote 方法与 Agent 工具共用的权威待办服务。 */
 export class PersonalTodoService extends TypertRemoteService {
-  static inject = ['sessionController', 'sessions']
+  static inject = ['sessionController', 'sessions', 'agents']
 
   static Config: z<Config> = z.object({
     databasePath: z.string().required(),
@@ -90,7 +91,8 @@ export class PersonalTodoService extends TypertRemoteService {
     super(ctx, 'personalTodo')
     const resolved = resolveConfig(config)
     this.store = new TodoStore(resolved)
-    this.orchestrator = new TodoOrchestrator(this.store, ctx.sessionController, resolved)
+    this.orchestrator = new TodoOrchestrator(this.store, ctx.sessionController, resolved,
+      (ctx as unknown as { agents: TodoAgentRegistry }).agents)
     ctx.on('session/created', (session) => {
       const parentSessionId = session.header.parentSession
       if (parentSessionId !== undefined) this.store.linkRelatedSession(parentSessionId, session.id)
@@ -102,6 +104,7 @@ export class PersonalTodoService extends TypertRemoteService {
       })
       return () => {
         recovery.abort()
+        this.orchestrator.dispose()
         this.store.close()
       }
     }, 'personal-todo: recover runs and close sqlite')
@@ -161,18 +164,30 @@ export class PersonalTodoService extends TypertRemoteService {
     return this.orchestrator.reply(request)
   }
 
-  /** 用户完成待处理、执行中、阻塞或待审核的待办；保留历史，不中断 Agent。 */
+  /** 用户确认完成任务；先停止活动执行并保留历史。 */
   @Remote
   approve(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return Promise.resolve(this.store.approve(request.id))
+    return this.orchestrator.setStatus(request.id, 'completed')
+  }
+
+  @Remote
+  setStatus(request: SetTodoStatusRequest, signal: AbortSignal): Promise<Todo> {
+    signal.throwIfAborted()
+    return this.orchestrator.setStatus(request.id, request.status)
+  }
+
+  @Remote
+  stop(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
+    signal.throwIfAborted()
+    return this.orchestrator.stop(request.id)
   }
 
   /** 归档待办，不改变其生命周期状态。 */
   @Remote
   archive(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return Promise.resolve(this.store.archive(request.id))
+    return this.orchestrator.archive(request.id)
   }
 
   /** 将归档待办恢复到对应生命周期列表。 */
@@ -191,16 +206,19 @@ export class PersonalTodoService extends TypertRemoteService {
 
   /** 记录待办主 Agent 会话汇报的进度节点。 */
   reportProgress(request: ReportTodoProgressRequest, sessionId: string): Promise<Todo> {
+    this.orchestrator.assertAvailable(request.id)
     return Promise.resolve(this.store.progress(request.id, sessionId, request.message))
   }
 
   /** 根据主 Agent 会话提出的问题暂停待办。 */
   block(request: BlockTodoRequest, sessionId: string): Promise<Todo> {
+    this.orchestrator.assertAvailable(request.id)
     return Promise.resolve(this.store.block(request, sessionId))
   }
 
   /** 提交主 Agent 会话的执行结果，等待用户审核。 */
   submitReview(request: SubmitTodoReviewRequest, sessionId: string): Promise<Todo> {
+    this.orchestrator.assertAvailable(request.id)
     return Promise.resolve(this.store.submitReview(request, sessionId))
   }
 
@@ -208,6 +226,7 @@ export class PersonalTodoService extends TypertRemoteService {
   @Remote
   delete(request: DeleteTodoRequest, signal: AbortSignal): Promise<DeleteTodoResult> {
     signal.throwIfAborted()
+    this.orchestrator.assertAvailable(request.id)
     return Promise.resolve(this.store.delete(request.id))
   }
 }

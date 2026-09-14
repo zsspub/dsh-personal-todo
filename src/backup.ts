@@ -13,7 +13,8 @@ const todoSchema = z.strictObject({
   title: z.string().min(1).max(200).refine(value => value.trim().length > 0),
   notes: optionalText,
   assignee: z.string().max(100).nullable(),
-  status: z.enum(TODO_STATUSES),
+  status: z.enum([...TODO_STATUSES, 'blocked', 'in_review']),
+  executionStatus: z.enum(['running', 'waiting_input', 'submitted', 'failed', 'stopped']).nullable().optional(),
   priority: z.enum(TODO_PRIORITIES),
   dueAt: optionalTimestamp,
   tags: z.array(z.string().min(1).max(32)).max(20).refine(tags =>
@@ -31,7 +32,7 @@ const todoSchema = z.strictObject({
 })
 const backupSchema = z.strictObject({
   format: z.literal('dsh-personal-todo'),
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   exportedAt: timestamp,
   todos: z.array(z.strictObject({
     todo: todoSchema,
@@ -90,7 +91,7 @@ export function parseTodoBackup(json: string): TodoBackup {
   const parsed = backupSchema.safeParse(value)
   if (!parsed.success) {
     const path = parsed.error.issues[0]?.path.join('.') ?? ''
-    throw new Error(`备份格式或字段无效：${path}。仅支持 dsh-personal-todo 版本 1。`)
+    throw new Error(`备份格式或字段无效：${path}。仅支持 dsh-personal-todo 版本 1 或 2。`)
   }
   const backup = parsed.data
   assertUnique(backup.todos.map(detail => detail.todo.id), 'Todo ID')
@@ -124,13 +125,37 @@ export function parseTodoBackup(json: string): TodoBackup {
     if (runs.some(run => sessionMap.get(run.rootSessionId)?.role !== 'primary')) invalid()
     const active = todo.activeRunId === null ? undefined : runMap.get(todo.activeRunId)
     if (todo.activeRunId !== null && (active === undefined || active.rootSessionId !== todo.primarySessionId)) invalid()
-    const expected = { in_progress: 'running', blocked: 'waiting_input', in_review: 'submitted' } as const
-    if (todo.status === 'in_progress' || todo.status === 'blocked' || todo.status === 'in_review') {
-      if (active?.status !== expected[todo.status]) invalid()
-    } else if (active !== undefined) invalid()
+    if (backup.version === 1) {
+      const expected = { in_progress: 'running', blocked: 'waiting_input', in_review: 'submitted' } as const
+      if (todo.status === 'in_progress' || todo.status === 'blocked' || todo.status === 'in_review') {
+        if (active?.status !== expected[todo.status]) invalid()
+      } else if (active !== undefined) invalid()
+    } else {
+      if (todo.status === 'blocked' || todo.status === 'in_review') invalid()
+      if (active !== undefined && (todo.status !== 'in_progress' || !['running', 'waiting_input', 'submitted'].includes(active.status))) invalid()
+      const latest = [...runs].sort((first, second) => second.sequence - first.sequence)[0]
+      const executionStatus = latest === undefined ? null : latest.status === 'cancelled' ? 'stopped' : latest.status
+      if (todo.executionStatus !== executionStatus) invalid()
+      if (active !== undefined && active.id !== latest?.id) invalid()
+    }
     if (runs.some(run => (run.status === 'running' || run.status === 'waiting_input')
       && (run.id !== todo.activeRunId || run.finishedAt !== null))) invalid()
+    if (runs.some(run => ['submitted', 'failed', 'cancelled'].includes(run.status) && run.finishedAt === null)) invalid()
     if (todo.status === 'in_progress' && todo.revision === Number.MAX_SAFE_INTEGER) invalid()
   }
-  return backup
+  return {
+    ...backup,
+    version: 2,
+    todos: backup.todos.map(detail => {
+      const latest = [...detail.runs].sort((first, second) => second.sequence - first.sequence)[0]
+      return {
+        ...detail,
+        todo: {
+          ...detail.todo,
+          status: detail.todo.status === 'blocked' || detail.todo.status === 'in_review' ? 'in_progress' : detail.todo.status,
+          executionStatus: latest === undefined ? null : latest.status === 'cancelled' ? 'stopped' : latest.status,
+        },
+      }
+    }),
+  }
 }

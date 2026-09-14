@@ -40,6 +40,35 @@ afterEach(() => {
 })
 
 describe('个人待办 JSON 备份', () => {
+  it('版本 2 保留人工进行中，不把任务进度当作执行状态', () => {
+    const source = store()
+    const manual = source.create({ title: '下班取快递' })
+    source.setStatus(manual.id, 'in_progress')
+    const target = store()
+    const backup = source.exportData().json
+    expect(JSON.parse(backup).version).toBe(2)
+    expect(target.importData(backup)).toEqual({ imported: 1, skipped: 0, resetToPending: 0 })
+    expect(snapshot(target)).toEqual(snapshot(source))
+    expect(target.recoverableTodos()).toEqual([])
+  })
+
+  it.each(['blocked', 'in_review'] as const)('兼容版本 1 的 %s，保留结果、问题及会话关联', status => {
+    const source = store()
+    const todo = source.create({ title: '旧版本任务' })
+    source.beginRun(todo.id, 'old-run', 'old-session')
+    if (status === 'blocked') source.block({ id: todo.id, question: '需要补充' }, 'old-session')
+    else source.submitReview({ id: todo.id, summary: '已完成工作' }, 'old-session')
+    const backup = snapshot(source)
+    const json = JSON.stringify({
+      ...backup, version: 1,
+      todos: backup.todos.map(detail => ({ ...detail, todo: { ...detail.todo, status, executionStatus: undefined } })),
+    })
+    const target = store()
+    expect(target.importData(json)).toEqual({ imported: 1, skipped: 0, resetToPending: 0 })
+    expect(snapshot(target)).toEqual(backup)
+    expect(target.recoverableTodos()).toEqual([])
+  })
+
   it('导出全部状态、归档和完整历史，不受分页及 200 条活动限制', () => {
     const source = store()
     source.create({ title: '待处理', assignee: '张三', notes: '备注', priority: 'high', tags: ['工作'], dueAt: '2026-10-01T12:00:00Z' })
@@ -77,7 +106,7 @@ describe('个人待办 JSON 备份', () => {
     expect(backup.todos.find(detail => detail.todo.id === history.id)!.events.length).toBeGreaterThan(210)
     const target = store()
     expect(target.importData(exported.json)).toEqual({ imported: 6, skipped: 0, resetToPending: 1 })
-    for (const detail of backup.todos.filter(detail => detail.todo.status !== 'in_progress')) {
+    for (const detail of backup.todos.filter(detail => detail.todo.executionStatus !== 'running')) {
       expect(snapshot(target).todos.find(candidate => candidate.todo.id === detail.todo.id)).toEqual(detail)
     }
   })
@@ -120,7 +149,7 @@ describe('个人待办 JSON 备份', () => {
     target.importData(JSON.stringify({ ...backup, todos: [archived] }))
     const imported = target.detail(original.todo.id)
     expect(imported.todo).toEqual({
-      ...archived.todo, status: 'pending', activeRunId: null, blockedReason: null,
+      ...archived.todo, status: 'pending', executionStatus: 'stopped', activeRunId: null, blockedReason: null,
       revision: original.todo.revision + 1, updatedAt: new Date(now).toISOString(),
     })
     expect(imported.runs).toEqual(original.runs.map(run => ({ ...run, status: 'cancelled', finishedAt: new Date(now).toISOString() })))
@@ -133,7 +162,7 @@ describe('个人待办 JSON 备份', () => {
 
   it.each([
     ['格式标识', (backup: TodoBackup) => ({ ...backup, format: 'other' })],
-    ['版本', (backup: TodoBackup) => ({ ...backup, version: 2 })],
+    ['版本', (backup: TodoBackup) => ({ ...backup, version: 3 })],
     ['重复待办', (backup: TodoBackup) => ({ ...backup, todos: [...backup.todos, ...backup.todos] })],
     ['无效标题', (backup: TodoBackup) => ({ ...backup, todos: [{ ...backup.todos[0], todo: { ...backup.todos[0]!.todo, title: 1 } }] })],
     ['无效时间', (backup: TodoBackup) => ({ ...backup, exportedAt: '2026-02-30T12:00:00Z' })],
