@@ -67,8 +67,8 @@ describe('TodoStore', () => {
     database.close()
     const migrated = store({ databasePath })
     expect(['waiting', 'review'].map(id => migrated.detail(id))).toEqual(before)
-    expect(migrated.list({ needsAttention: true })).toMatchObject({
-      total: 2, counts: { inProgress: 2, needsAttention: 2 },
+    expect(migrated.list({})).toMatchObject({
+      total: 2, counts: { inProgress: 2 },
     })
     const check = new DatabaseSync(databasePath)
     expect(check.prepare('PRAGMA foreign_key_check').all()).toEqual([])
@@ -124,7 +124,7 @@ describe('TodoStore', () => {
     expect(todos.detail(todo.id).events).toMatchObject([{ type: 'created', message: null }])
     expect(todos.list()).toMatchObject({
       total: 1,
-      counts: { pending: 1, inProgress: 0, needsAttention: 0, completed: 0, cancelled: 0, archived: 0 },
+      counts: { pending: 1, inProgress: 0, completed: 0, cancelled: 0, archived: 0 },
     })
   })
 
@@ -360,8 +360,8 @@ describe('TodoStore', () => {
     todos.submitReview({ id: reviewed.id, summary: 'Ready' }, 'session-reviewed')
 
     expect(todos.list({ tags: ['work'] }).todos.map(todo => todo.id)).toEqual(['reviewed', 'blocked', 'working', 'pending'])
-    expect(todos.list({ needsAttention: true, tags: ['INPUT'] }).todos.map(todo => todo.id)).toEqual(['blocked'])
-    expect(todos.list({ needsAttention: true })).toMatchObject({ total: 2, counts: { inProgress: 3, needsAttention: 2 } })
+    expect(todos.list({ tags: ['INPUT'] }).todos.map(todo => todo.id)).toEqual(['blocked'])
+    expect(todos.list({ statuses: ['in_progress'] })).toMatchObject({ total: 3, counts: { inProgress: 3 } })
     expect(todos.list({ search: 'alice' }).todos.map(todo => todo.id)).toEqual(['blocked', 'pending'])
     expect(todos.update(working.id, { notes: '  updated  ', assignee: null, priority: 'medium', tags: [] })).toMatchObject({
       status: 'in_progress', notes: 'updated', assignee: null, priority: 'medium', tags: [], revision: 2,

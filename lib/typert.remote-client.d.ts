@@ -3,42 +3,38 @@ import type {
   RemoteResult,
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, SetTodoStatusRequest, Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest } from 'dsh-personal-todo/types'
+import type { CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, ListTodoInput, LiveTodo, LiveTodoDetail, LiveTodoListResult, SetTodoStatusRequest, TodoIdRequest, UpdateTodoRequest } from 'dsh-personal-todo/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$706572736f6e616c546f646f {
-    approve: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    archive: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    create: (request: CreateTodoInput, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
+    approve: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    archive: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    create: (request: CreateTodoInput, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
     delete: (request: DeleteTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<DeleteTodoResult>>
     exportData: (_request: ExportTodoDataRequest, signal?: AbortSignal) => Promise<RemoteResult<ExportTodoDataResult>>
-    get: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<TodoDetail>>
+    get: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodoDetail>>
     importData: (request: ImportTodoDataRequest, signal?: AbortSignal) => Promise<RemoteResult<ImportTodoDataResult>>
-    list: (request: ListTodoInput, signal?: AbortSignal) => Promise<RemoteResult<TodoListResult>>
-    reply: (request: ReplyTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    requestChanges: (request: RequestTodoChangesRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    restore: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    setStatus: (request: SetTodoStatusRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    start: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    stop: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    update: (request: UpdateTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
+    list: (request: ListTodoInput, signal?: AbortSignal) => Promise<RemoteResult<LiveTodoListResult>>
+    restore: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    setStatus: (request: SetTodoStatusRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    start: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    stop: (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    update: (request: UpdateTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
   }
   interface TypertRemoteMap {
-    'personalTodo/approve': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    'personalTodo/archive': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    'personalTodo/create': (request: CreateTodoInput, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
+    'personalTodo/approve': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    'personalTodo/archive': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    'personalTodo/create': (request: CreateTodoInput, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
     'personalTodo/delete': (request: DeleteTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<DeleteTodoResult>>
     'personalTodo/exportData': (_request: ExportTodoDataRequest, signal?: AbortSignal) => Promise<RemoteResult<ExportTodoDataResult>>
-    'personalTodo/get': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<TodoDetail>>
+    'personalTodo/get': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodoDetail>>
     'personalTodo/importData': (request: ImportTodoDataRequest, signal?: AbortSignal) => Promise<RemoteResult<ImportTodoDataResult>>
-    'personalTodo/list': (request: ListTodoInput, signal?: AbortSignal) => Promise<RemoteResult<TodoListResult>>
-    'personalTodo/reply': (request: ReplyTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    'personalTodo/requestChanges': (request: RequestTodoChangesRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    'personalTodo/restore': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    'personalTodo/setStatus': (request: SetTodoStatusRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    'personalTodo/start': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    'personalTodo/stop': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
-    'personalTodo/update': (request: UpdateTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<Todo>>
+    'personalTodo/list': (request: ListTodoInput, signal?: AbortSignal) => Promise<RemoteResult<LiveTodoListResult>>
+    'personalTodo/restore': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    'personalTodo/setStatus': (request: SetTodoStatusRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    'personalTodo/start': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    'personalTodo/stop': (request: TodoIdRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
+    'personalTodo/update': (request: UpdateTodoRequest, signal?: AbortSignal) => Promise<RemoteResult<LiveTodo>>
   }
   interface TypertRemoteNamespaceMap {
     'personalTodo': TypertRemoteNamespace$706572736f6e616c546f646f

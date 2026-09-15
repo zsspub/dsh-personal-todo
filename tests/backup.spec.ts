@@ -40,6 +40,25 @@ afterEach(() => {
 })
 
 describe('个人待办 JSON 备份', () => {
+  it('新执行仅保存会话关联，无 Run，完整往返且不成为恢复候选', () => {
+    const source = store()
+    const todo = source.create({ title: '使用原对话执行', assignee: '张三', tags: ['工作'] })
+    source.attachSession(todo.id, 'root')
+    source.linkRelatedSession('root', 'child')
+    source.linkRelatedSession('child', 'nested')
+    expect(source.detail(todo.id)).toMatchObject({
+      todo: { status: 'in_progress', activeRunId: null, executionStatus: null },
+      runs: [],
+      sessions: [{ sessionId: 'root' }, { sessionId: 'child' }, { sessionId: 'nested' }],
+    })
+    const target = store()
+    const backup = source.exportData().json
+    expect(target.importData(backup)).toEqual({ imported: 1, skipped: 0, resetToPending: 0 })
+    expect(snapshot(target)).toEqual(snapshot(source))
+    expect(target.recoverableTodos()).toEqual([])
+    expect(target.importData(backup)).toEqual({ imported: 0, skipped: 1, resetToPending: 0 })
+  })
+
   it('版本 2 保留人工进行中，不把任务进度当作执行状态', () => {
     const source = store()
     const manual = source.create({ title: '下班取快递' })

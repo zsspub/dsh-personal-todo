@@ -1,6 +1,6 @@
-/** 面向模型的待办创建、查询、编辑、进度、阻塞和审核工具。 */
+/** 面向模型的待办管理工具；不参与 Agent 对话执行流程。 */
 import type { Context } from '@deepseek-ai/cordis';
 export declare const name = "personal-todo-tools";
 export declare const inject: string[];
-/** 注册个人待办的增删改查及 Agent 专属生命周期工具。 */
+/** 注册用户按需调用的待办管理与备份工具。 */
 export declare function apply(ctx: Context): void;

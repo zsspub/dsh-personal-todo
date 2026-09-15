@@ -58,6 +58,8 @@ export declare class TodoStore {
     create(input: CreateTodoInput): Todo;
     /** 替换指定的可编辑字段，返回持久化后的待办。 */
     update(id: string, patch: UpdateTodoPatch): Todo;
+    linkedSessionIds(): string[];
+    attachSession(id: string, sessionId: string): Todo;
     /** 认领一条待处理待办，并创建其首轮 Agent 执行周期。 */
     beginRun(id: string, runId: string, sessionId: string): Todo;
     /** 直接父会话已关联待办时，将子会话关联到同一待办。 */

@@ -813,6 +813,35 @@ export class TodoStore {
     return { ...this.todoFromRow(row), tags }
   }
 
+  linkedSessionIds(): string[] {
+    this.assertOpen()
+    return (this.database.prepare('SELECT primary_session_id FROM todos WHERE primary_session_id IS NOT NULL')
+      .all() as { primary_session_id: string }[]).map(row => row.primary_session_id)
+  }
+
+  attachSession(id: string, sessionId: string): Todo {
+    this.assertOpen()
+    const current = this.requireRow(id)
+    if (current.archived_at !== null || !['pending', 'in_progress'].includes(current.status)) {
+      throw new PersonalTodoError('只有未归档的未完成任务可以交给 Agent。')
+    }
+    if (current.primary_session_id !== null && current.primary_session_id !== sessionId) {
+      throw new PersonalTodoError('待办已关联其他主会话。')
+    }
+    const timestamp = this.now()
+    this.transaction(() => {
+      if (current.primary_session_id === null) this.database.prepare(`
+        INSERT INTO todo_sessions (todo_id, session_id, role, parent_session_id, created_at)
+        VALUES (?, ?, 'primary', NULL, ?)
+      `).run(id, sessionId, timestamp)
+      this.database.prepare(`
+        UPDATE todos SET status = 'in_progress', primary_session_id = ?, revision = revision + 1, updated_at = ? WHERE id = ?
+      `).run(sessionId, timestamp, id)
+      this.appendEvent(id, null, 'updated', '用户将任务交给 Agent，执行情况请查看关联对话。', timestamp)
+    })
+    return this.get(id)
+  }
+
   /** 认领一条待处理待办，并创建其首轮 Agent 执行周期。 */
   beginRun(id: string, runId: string, sessionId: string): Todo {
     this.assertOpen()
@@ -1131,9 +1160,6 @@ export class TodoStore {
     where.push(input.archived === true ? 't.archived_at IS NOT NULL' : 't.archived_at IS NULL')
     where.push(`t.status IN (${statuses.map(() => '?').join(', ')})`)
     parameters.push(...statuses)
-    if (input.needsAttention === true) {
-      where.push("t.status = 'in_progress' AND t.active_run_id IN (SELECT id FROM todo_runs WHERE status IN ('waiting_input', 'submitted'))")
-    }
     if (priorities !== undefined) {
       where.push(`t.priority IN (${priorities.map(() => '?').join(', ')})`)
       parameters.push(...priorities)
@@ -1160,7 +1186,6 @@ export class TodoStore {
       FROM todos t
       WHERE ${predicate}
       ORDER BY
-        CASE WHEN t.active_run_id IN (SELECT id FROM todo_runs WHERE status IN ('waiting_input', 'submitted')) THEN 0 ELSE 1 END,
         CASE t.status WHEN 'in_progress' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
         CASE WHEN t.status = 'completed' THEN t.completed_at END DESC,
         CASE WHEN t.status NOT IN ('completed', 'cancelled') AND t.due_at IS NULL THEN 1 ELSE 0 END,
@@ -1189,7 +1214,7 @@ export class TodoStore {
   }
 
   private counts(): TodoCounts {
-    const counts = { pending: 0, inProgress: 0, needsAttention: 0, completed: 0, cancelled: 0, archived: 0 }
+    const counts = { pending: 0, inProgress: 0, completed: 0, cancelled: 0, archived: 0 }
     const rows = this.database.prepare('SELECT status, COUNT(*) AS count FROM todos WHERE archived_at IS NULL GROUP BY status').all() as {
       status: TodoStatus
       count: number
@@ -1202,9 +1227,6 @@ export class TodoStore {
     }
     counts.archived = (this.database.prepare(
       'SELECT COUNT(*) AS count FROM todos WHERE archived_at IS NOT NULL',
-    ).get() as { count: number }).count
-    counts.needsAttention = (this.database.prepare(
-      "SELECT COUNT(*) AS count FROM todos WHERE archived_at IS NULL AND status = 'in_progress' AND active_run_id IN (SELECT id FROM todo_runs WHERE status IN ('waiting_input', 'submitted'))",
     ).get() as { count: number }).count
     return counts
   }

@@ -4,11 +4,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { TodoOrchestrator, type TodoSessionController, type TodoAgentRegistry } from './host/orchestrator.ts'
+import { TodoRuntime, type RuntimeEvent, type TodoSessionQuery } from './host/runtime.ts'
 import { TodoStore, type JournalMode } from './host/store.ts'
 import type {
-  BlockTodoRequest, CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput,
-  ReplyTodoRequest, ReportTodoProgressRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest,
-  Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest,
+  CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput,
+  Todo as StoredTodo, LiveTodo as Todo, LiveTodoDetail as TodoDetail, TodoIdRequest, LiveTodoListResult as TodoListResult, UpdateTodoRequest,
   ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult,
   SetTodoStatusRequest,
 } from './types.ts'
@@ -29,6 +29,10 @@ declare module '@deepseek-ai/cordis' {
       readonly id: string
       readonly header: { readonly parentSession?: string }
     }): void
+    'agent/status'(payload: { readonly agent: { readonly id: string }; readonly status: 'running' | 'idle' }): void
+    'agent/error'(payload: { readonly agent: { readonly id: string }; readonly error: unknown }): void
+    'agent/disposed'(payload: { readonly agent: { readonly id: string } }): void
+    'session/event'(session: { readonly id: string }, event: RuntimeEvent): void
   }
 }
 
@@ -72,7 +76,7 @@ function resolveConfig(config: Config): ResolvedConfig {
 
 /** 生成的 Remote 方法与 Agent 工具共用的权威待办服务。 */
 export class PersonalTodoService extends TypertRemoteService {
-  static inject = ['sessionController', 'sessions', 'agents']
+  static inject = ['sessionController', 'sessions', 'agents', 'sessionQuery']
 
   static Config: z<Config> = z.object({
     databasePath: z.string().required(),
@@ -85,36 +89,46 @@ export class PersonalTodoService extends TypertRemoteService {
 
   private readonly store: TodoStore
   private readonly orchestrator: TodoOrchestrator
+  private readonly runtime: TodoRuntime
 
   /** @param ctx - 发布 personalTodo Remote 命名空间的 Host 上下文。 @param config - 已校验的数据库配置。 */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'personalTodo')
     const resolved = resolveConfig(config)
     this.store = new TodoStore(resolved)
-    this.orchestrator = new TodoOrchestrator(this.store, ctx.sessionController, resolved,
-      (ctx as unknown as { agents: TodoAgentRegistry }).agents)
+    const host = ctx as unknown as { agents: TodoAgentRegistry; sessionQuery: TodoSessionQuery }
+    this.runtime = new TodoRuntime(host.agents, host.sessionQuery, message => ctx.logger.warn(message))
+    for (const id of this.store.linkedSessionIds()) this.runtime.watch(id)
+    this.orchestrator = new TodoOrchestrator(this.store, ctx.sessionController, resolved, host.agents, this.runtime)
+    ctx.on('agent/status', ({ agent, status }) => { this.runtime.agentStatus(agent.id, status) }, { global: true })
+    ctx.on('agent/error', ({ agent }) => { this.runtime.notify(agent.id, 'failed') }, { global: true })
+    ctx.on('agent/disposed', ({ agent }) => { this.runtime.agentDisposed(agent.id) }, { global: true })
+    ctx.on('session/event', (session, event) => { this.runtime.event(session.id, event) }, { global: true })
     ctx.on('session/created', (session) => {
       const parentSessionId = session.header.parentSession
       if (parentSessionId !== undefined) this.store.linkRelatedSession(parentSessionId, session.id)
     }, { global: true })
-    ctx.effect(() => {
-      const recovery = new AbortController()
-      void this.orchestrator.recover(recovery.signal).catch((error: unknown) => {
-        if (!recovery.signal.aborted) ctx.logger.warn(`personal-todo: recovery failed: ${String(error)}`)
-      })
-      return () => {
-        recovery.abort()
-        this.orchestrator.dispose()
-        this.store.close()
-      }
-    }, 'personal-todo: recover runs and close sqlite')
+    ctx.effect(() => () => {
+      this.runtime.dispose()
+      this.store.close()
+    }, 'personal-todo: dispose runtime and close sqlite')
+  }
+
+  private async present(todo: StoredTodo, signal: AbortSignal): Promise<Todo> {
+    if (todo.primarySessionId === null) return { ...todo, executionStatus: null }
+    await this.runtime.refresh(todo.primarySessionId)
+    signal.throwIfAborted()
+    return { ...todo, executionStatus: this.runtime.status(todo.primarySessionId) }
   }
 
   /** 查询一页待办；在开始同步 SQLite 操作前检查取消信号。 */
   @Remote
   list(request: ListTodoInput, signal: AbortSignal): Promise<TodoListResult> {
     signal.throwIfAborted()
-    return Promise.resolve(this.store.list(request))
+    const page = this.store.list(request)
+    return Promise.all(page.todos.map(todo => this.present(todo, signal))).then(todos => ({
+      ...page, todos,
+    }))
   }
 
   @Remote
@@ -126,100 +140,71 @@ export class PersonalTodoService extends TypertRemoteService {
   @Remote
   importData(request: ImportTodoDataRequest, signal: AbortSignal): Promise<ImportTodoDataResult> {
     signal.throwIfAborted()
-    return Promise.resolve(this.store.importData(request.json))
+    const result = this.store.importData(request.json)
+    for (const id of this.store.linkedSessionIds()) this.runtime.watch(id)
+    return Promise.resolve(result)
   }
 
   /** 创建并持久化一条待办。 */
   @Remote
   create(request: CreateTodoInput, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return Promise.resolve(this.store.create(request))
+    return this.present(this.store.create(request), signal)
   }
 
   /** 读取待办及其执行轮次、关联会话和活动记录。 */
   @Remote
   get(request: TodoIdRequest, signal: AbortSignal): Promise<TodoDetail> {
     signal.throwIfAborted()
-    return Promise.resolve(this.store.detail(request.id))
+    const detail = this.store.detail(request.id)
+    return this.present(detail.todo, signal).then(todo => ({ ...detail, todo }))
   }
 
   /** 更新已持久化的待办。 */
   @Remote
   update(request: UpdateTodoRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return Promise.resolve(this.store.update(request.id, request.patch))
+    return this.present(this.store.update(request.id, request.patch), signal)
   }
 
   /** 在待办的持久化根会话中启动一条待处理任务。 */
   @Remote
   start(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return this.orchestrator.start(request.id)
-  }
-
-  /** 使用用户回复继续执行被阻塞的待办。 */
-  @Remote
-  reply(request: ReplyTodoRequest, signal: AbortSignal): Promise<Todo> {
-    signal.throwIfAborted()
-    return this.orchestrator.reply(request)
+    return this.orchestrator.start(request.id).then(todo => this.present(todo, signal))
   }
 
   /** 用户确认完成任务；先停止活动执行并保留历史。 */
   @Remote
   approve(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return this.orchestrator.setStatus(request.id, 'completed')
+    return this.orchestrator.setStatus(request.id, 'completed').then(todo => this.present(todo, signal))
   }
 
   @Remote
   setStatus(request: SetTodoStatusRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return this.orchestrator.setStatus(request.id, request.status)
+    return this.orchestrator.setStatus(request.id, request.status).then(todo => this.present(todo, signal))
   }
 
   @Remote
   stop(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return this.orchestrator.stop(request.id)
+    return this.orchestrator.stop(request.id).then(todo => this.present(todo, signal))
   }
 
   /** 归档待办，不改变其生命周期状态。 */
   @Remote
   archive(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return this.orchestrator.archive(request.id)
+    return this.orchestrator.archive(request.id).then(todo => this.present(todo, signal))
   }
 
   /** 将归档待办恢复到对应生命周期列表。 */
   @Remote
   restore(request: TodoIdRequest, signal: AbortSignal): Promise<Todo> {
     signal.throwIfAborted()
-    return Promise.resolve(this.store.restore(request.id))
-  }
-
-  /** 将用户修改意见发回待办的根会话。 */
-  @Remote
-  requestChanges(request: RequestTodoChangesRequest, signal: AbortSignal): Promise<Todo> {
-    signal.throwIfAborted()
-    return this.orchestrator.requestChanges(request)
-  }
-
-  /** 记录待办主 Agent 会话汇报的进度节点。 */
-  reportProgress(request: ReportTodoProgressRequest, sessionId: string): Promise<Todo> {
-    this.orchestrator.assertAvailable(request.id)
-    return Promise.resolve(this.store.progress(request.id, sessionId, request.message))
-  }
-
-  /** 根据主 Agent 会话提出的问题暂停待办。 */
-  block(request: BlockTodoRequest, sessionId: string): Promise<Todo> {
-    this.orchestrator.assertAvailable(request.id)
-    return Promise.resolve(this.store.block(request, sessionId))
-  }
-
-  /** 提交主 Agent 会话的执行结果，等待用户审核。 */
-  submitReview(request: SubmitTodoReviewRequest, sessionId: string): Promise<Todo> {
-    this.orchestrator.assertAvailable(request.id)
-    return Promise.resolve(this.store.submitReview(request, sessionId))
+    return this.present(this.store.restore(request.id), signal)
   }
 
   /** 永久删除一条待办。 */

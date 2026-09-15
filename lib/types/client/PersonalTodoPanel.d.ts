@@ -1,6 +1,6 @@
 import React from 'react';
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
-import type { CreateTodoInput, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, RequestTodoChangesRequest, Todo, TodoDetail, TodoListResult, UpdateTodoRequest } from '../types.ts';
+import type { CreateTodoInput, DeleteTodoResult, ListTodoInput, Todo, TodoDetail, TodoListResult, UpdateTodoRequest } from '../types.ts';
 import type { ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, SetTodoStatusRequest } from '../types.ts';
 import type { PersonalTodoCanvasController } from './canvas.ts';
 import type { NS } from './locales.ts';
@@ -14,13 +14,11 @@ export interface PersonalTodoPanelInjected {
     readonly create: (request: CreateTodoInput, signal: AbortSignal) => Promise<Todo>;
     readonly update: (request: UpdateTodoRequest, signal: AbortSignal) => Promise<Todo>;
     readonly start: (id: string, signal: AbortSignal) => Promise<Todo>;
-    readonly reply: (request: ReplyTodoRequest, signal: AbortSignal) => Promise<Todo>;
     readonly approve: (id: string, signal: AbortSignal) => Promise<Todo>;
     readonly setStatus: (request: SetTodoStatusRequest, signal: AbortSignal) => Promise<Todo>;
     readonly stop: (id: string, signal: AbortSignal) => Promise<Todo>;
     readonly archive: (id: string, signal: AbortSignal) => Promise<Todo>;
     readonly restore: (id: string, signal: AbortSignal) => Promise<Todo>;
-    readonly requestChanges: (request: RequestTodoChangesRequest, signal: AbortSignal) => Promise<Todo>;
     readonly delete: (id: string, signal: AbortSignal) => Promise<DeleteTodoResult>;
     readonly openSession: (id: string, parentSessionId: string | null) => Promise<boolean>;
 }

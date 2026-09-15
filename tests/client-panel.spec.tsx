@@ -102,7 +102,8 @@ function detail(row: Todo): TodoDetail {
       id: row.activeRunId ?? 'run-1',
       todoId: row.id,
       sequence: row.reviewRound === 0 ? 1 : row.reviewRound,
-      status: row.executionStatus === 'stopped' ? 'cancelled' : row.executionStatus ?? 'running',
+      status: row.executionStatus === 'stopped' ? 'cancelled'
+        : row.executionStatus === 'idle' || row.executionStatus === 'unavailable' ? 'failed' : row.executionStatus ?? 'running',
       rootSessionId: row.primarySessionId,
       resultSummary: row.executionStatus === 'submitted' ? row.latestSummary : null,
       verification: row.executionStatus === 'submitted' ? 'Unit tests passed.' : null,
@@ -167,13 +168,11 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
       const archived = request.archived === true
       const matching = rows.filter(row => statuses.includes(row.status)
         && (row.archivedAt !== null) === archived
-        && (!request.needsAttention || (row.activeRunId !== null && (row.executionStatus === 'waiting_input' || row.executionStatus === 'submitted')))
         && tags.every(tag => row.tags.includes(tag.toLowerCase()))
         && (search === undefined || `${row.title} ${row.notes ?? ''}`.toLowerCase().includes(search)))
       const counts: TodoCounts = {
         pending: rows.filter(row => row.archivedAt === null && row.status === 'pending').length,
         inProgress: rows.filter(row => row.archivedAt === null && row.status === 'in_progress').length,
-        needsAttention: rows.filter(row => row.archivedAt === null && row.activeRunId !== null && (row.executionStatus === 'waiting_input' || row.executionStatus === 'submitted')).length,
         completed: rows.filter(row => row.archivedAt === null && row.status === 'completed').length,
         cancelled: rows.filter(row => row.archivedAt === null && row.status === 'cancelled').length,
         archived: rows.filter(row => row.archivedAt !== null).length,
@@ -212,7 +211,7 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
     }),
     start: vi.fn(async (id: string, signal: AbortSignal) => {
       signal.throwIfAborted()
-      return replace(id, { status: 'in_progress', executionStatus: 'running', primarySessionId: `session-${id}`, activeRunId: `run-${id}` })
+      return replace(id, { status: 'in_progress', executionStatus: 'running', primarySessionId: `session-${id}`, activeRunId: null })
     }),
     setStatus: vi.fn(async (request, signal) => {
       signal.throwIfAborted()
@@ -221,10 +220,6 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
     stop: vi.fn(async (id, signal) => {
       signal.throwIfAborted()
       return replace(id, { executionStatus: 'stopped', activeRunId: null, blockedReason: null })
-    }),
-    reply: vi.fn(async (request, signal) => {
-      signal.throwIfAborted()
-      return replace(request.id, { status: 'in_progress', executionStatus: 'running', blockedReason: null, latestSummary: request.message })
     }),
     approve: vi.fn(async (id, signal) => {
       signal.throwIfAborted()
@@ -237,10 +232,6 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
     restore: vi.fn(async (id, signal) => {
       signal.throwIfAborted()
       return replace(id, { archivedAt: null })
-    }),
-    requestChanges: vi.fn(async (request, signal) => {
-      signal.throwIfAborted()
-      return replace(request.id, { status: 'in_progress', executionStatus: 'running', activeRunId: 'run-2', latestSummary: request.feedback })
     }),
     delete: vi.fn(async (id: string, signal: AbortSignal) => {
       signal.throwIfAborted()
@@ -295,18 +286,17 @@ describe('PersonalTodoCanvas', () => {
     { status: 'pending', executionStatus: null, buttons: ['Mark complete', '交给 Agent', '更多待办操作'], primary: 'Mark complete' },
     { status: 'in_progress', executionStatus: null, buttons: ['Mark complete', '交给 Agent', '更多待办操作'], primary: 'Mark complete' },
     { status: 'in_progress', executionStatus: 'running', buttons: ['Open conversation', '停止并接手', '更多待办操作'], primary: 'Open conversation' },
-    { status: 'in_progress', executionStatus: 'waiting_input', buttons: ['Open conversation', '更多待办操作'], primary: 'Reply and continue' },
-    { status: 'in_progress', executionStatus: 'submitted', buttons: ['Open conversation', '更多待办操作'], primary: '确认完成' },
-    { status: 'in_progress', executionStatus: 'failed', buttons: ['Mark complete', '交给 Agent', '更多待办操作'], primary: 'Mark complete' },
-    { status: 'in_progress', executionStatus: 'stopped', buttons: ['Mark complete', '交给 Agent', '更多待办操作'], primary: 'Mark complete' },
+    { status: 'in_progress', executionStatus: 'idle', buttons: ['Mark complete', 'Open conversation', '更多待办操作'], primary: 'Mark complete' },
+    { status: 'in_progress', executionStatus: 'unavailable', buttons: ['Mark complete', 'Open conversation', '更多待办操作'], primary: 'Mark complete' },
+    { status: 'in_progress', executionStatus: 'failed', buttons: ['Mark complete', 'Open conversation', '更多待办操作'], primary: 'Mark complete' },
+    { status: 'in_progress', executionStatus: 'stopped', buttons: ['Mark complete', 'Open conversation', '更多待办操作'], primary: 'Mark complete' },
     { status: 'completed', executionStatus: null, buttons: ['重新打开', '更多待办操作'], primary: '重新打开' },
     { status: 'cancelled', executionStatus: null, buttons: ['重新打开', '更多待办操作'], primary: '重新打开' },
   ] as const)('$status / $executionStatus 详情只显示相关动作且仅一个主操作', async ({ status, executionStatus, buttons, primary }) => {
     const user = userEvent.setup()
-    const active = executionStatus === 'running' || executionStatus === 'waiting_input' || executionStatus === 'submitted'
     const service = api([todo({
       status, executionStatus, primarySessionId: executionStatus === null ? null : 'session-1',
-      activeRunId: active ? 'run-1' : null,
+      activeRunId: null,
     })])
     render(<TodoSurface service={service} />)
     await user.click(screen.getByRole('button', { name: /personal todos/i }))
@@ -363,7 +353,7 @@ describe('PersonalTodoCanvas', () => {
     await user.click(screen.getByRole('menuitem', { name: /Archive/ }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
     const actions = document.querySelector('.dsh-personal-todo-detail-actions') as HTMLElement
-    expect(within(actions).getAllByRole('button').map(button => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Restore', '更多待办操作'])
+    expect(within(actions).getAllByRole('button').map(button => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['Open conversation', 'Restore', '更多待办操作'])
     expect(screen.queryByRole('button', { name: '确认完成' })).toBeNull()
     expect(screen.queryByRole('button', { name: '继续修改' })).toBeNull()
     await user.click(screen.getByRole('button', { name: '更多待办操作' }))
@@ -423,7 +413,8 @@ describe('PersonalTodoCanvas', () => {
     await waitFor(() => { expect(screen.queryByRole('dialog')).toBeNull() })
     expect(service.rows[0]).toMatchObject({ status: 'in_progress', executionStatus: 'stopped', activeRunId: null })
     expect(service.start).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: '交给 Agent' })).toBeTruthy()
+    await selectDetailMenu(user, '交给 Agent')
+    expect(service.start).toHaveBeenCalledOnce()
   })
 
   function backupFile(rows: Todo[] = [], json?: string): File {
@@ -474,7 +465,7 @@ describe('PersonalTodoCanvas', () => {
     const input = screen.getByLabelText('选择 JSON 备份')
     await user.upload(input, file)
     const dialog = await screen.findByRole('dialog', { name: '确认导入备份' })
-    expect(within(dialog).getByText(/共 2 项待办，其中 1 项正在执行/u)).toBeTruthy()
+    expect(within(dialog).getByText(/共 2 项待办，其中 1 项含旧版运行中记录/u)).toBeTruthy()
     expect(service.importData).not.toHaveBeenCalled()
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     expect(service.importData).not.toHaveBeenCalled()
@@ -483,7 +474,7 @@ describe('PersonalTodoCanvas', () => {
     expect(await screen.findByText('导入完成：新增 1 项，跳过 1 项，其中 1 项已转为待处理。')).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'In progress 0' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByRole('tab', { name: 'Pending 2' })).toBeTruthy()
-    expect(service.canvas.getSnapshot().attentionCount).toBe(0)
+    expect(service.canvas.getSnapshot().attentionCount).toBe(2)
     expect(service.importData).toHaveBeenCalledTimes(1)
   })
 
@@ -659,7 +650,7 @@ describe('PersonalTodoCanvas', () => {
     expect(screen.getByRole('button', { name: /personal todos/i }).textContent).toBe('')
   })
 
-  it('侧栏只统计等用户回复和确认结果，不计入普通待办', async () => {
+  it('侧栏统计未完成任务，不再按等待回复或审核分类', async () => {
     const service = api([
       todo({ id: 'blocked', status: 'in_progress', executionStatus: 'waiting_input', activeRunId: 'blocked-run', blockedReason: 'Need input' }),
       todo({ id: 'review', status: 'in_progress', executionStatus: 'submitted', activeRunId: 'review-run', latestSummary: 'Ready' }),
@@ -671,8 +662,8 @@ describe('PersonalTodoCanvas', () => {
     ])
     render(<TodoSurface service={service} />)
 
-    const trigger = await screen.findByRole('button', { name: '2 personal todos require attention' })
-    expect(within(trigger).getByText('2')).toBeTruthy()
+    const trigger = await screen.findByRole('button', { name: '4 项待办未完成' })
+    expect(within(trigger).getByText('4')).toBeTruthy()
     expect(screen.queryByRole('dialog', { name: 'Personal Todos' })).toBeNull()
   })
 
@@ -693,7 +684,7 @@ describe('PersonalTodoCanvas', () => {
       expect(service.list).toHaveBeenCalledTimes(1)
       expect(service.list).toHaveBeenCalledWith(expect.objectContaining({ limit: 1 }), expect.any(AbortSignal))
     }
-    expect(screen.getByRole('button', { name: 'Open personal todos' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '1 项待办未完成' })).toBeTruthy()
     rendered.unmount()
     vi.mocked(service.list).mockClear()
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
@@ -758,8 +749,8 @@ describe('PersonalTodoCanvas', () => {
       expect(screen.queryByRole('button', { name: /Pending task/ })).toBeNull()
     }
 
-    await user.click(screen.getByRole('checkbox', { name: /需要我处理/ }))
-    expect(screen.queryByRole('button', { name: /Running task/ })).toBeNull()
+    expect(screen.queryByRole('checkbox', { name: /需要我处理/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Running task/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Blocked task/ })).toBeTruthy()
     await user.click(screen.getByRole('tab', { name: 'Completed 1' }))
     expect(await screen.findByRole('button', { name: /Completed task/ })).toBeTruthy()
@@ -948,7 +939,7 @@ describe('PersonalTodoCanvas', () => {
     expect(service.openSession).toHaveBeenCalledWith('child-1', 'session-1')
   })
 
-  it('surfaces blocked questions and resumes from an inline reply', async () => {
+  it('旧阻塞记录不再出现回复框，沟通统一跳转原对话', async () => {
     const user = userEvent.setup()
     const service = api([todo({
       status: 'in_progress', executionStatus: 'waiting_input', primarySessionId: 'session-1', activeRunId: 'run-1',
@@ -958,13 +949,11 @@ describe('PersonalTodoCanvas', () => {
     await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(screen.getByRole('tab', { name: /In progress/ }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
-    expect((await screen.findAllByText('Which option?')).length).toBeGreaterThan(0)
-    const replyBox = screen.getByRole('textbox', { name: 'Reply to Agent' })
-    expect(replyBox.closest('.dsh-personal-todo-commandbar')).toBeTruthy()
-    await user.type(replyBox, 'Use option A')
-    await user.click(screen.getByRole('button', { name: 'Reply and continue' }))
-    await waitFor(() => expect(service.reply).toHaveBeenCalledWith({ id: 'todo-1', message: 'Use option A' }, expect.any(AbortSignal)))
-    expect(service.rows[0]).toMatchObject({ status: 'in_progress', blockedReason: null })
+    expect(screen.queryByRole('textbox', { name: 'Reply to Agent' })).toBeNull()
+    expect(screen.queryByText('Which option?')).toBeNull()
+    await user.click(within(document.querySelector('.dsh-personal-todo-detail-actions') as HTMLElement).getByRole('button', { name: 'Open conversation' }))
+    expect(service.openSession).toHaveBeenCalledWith('session-1', null)
+    expect(service.rows[0]).toMatchObject({ status: 'in_progress', blockedReason: 'Which option?' })
   })
 
   it.each([
@@ -984,40 +973,30 @@ describe('PersonalTodoCanvas', () => {
     expect(await screen.findByRole('button', { name: /Ship plugin/ })).toBeTruthy()
   })
 
-  it('approves a review or returns feedback to in-progress', async () => {
+  it('旧审核结果仅作为历史展示，完成任务不需要审核流程', async () => {
     const user = userEvent.setup()
     const review = todo({
       status: 'in_progress', executionStatus: 'submitted', primarySessionId: 'session-1', activeRunId: 'run-1',
       latestSummary: 'Implemented the change.', reviewRound: 1,
     })
     const service = api([review])
-    const view = render(<TodoSurface service={service} />)
+    render(<TodoSurface service={service} />)
     await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(screen.getByRole('tab', { name: /In progress/ }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
     expect(await screen.findByText('Unit tests passed.')).toBeTruthy()
-    const changeRequest = screen.getByRole('textbox', { name: 'Change request' })
-    expect(changeRequest.closest('.dsh-personal-todo-commandbar')).toBeTruthy()
-    await user.type(changeRequest, 'Add one edge case.')
-    await user.click(screen.getByRole('button', { name: '继续修改' }))
-    await waitFor(() => expect(service.rows[0]).toMatchObject({ status: 'in_progress', latestSummary: 'Add one edge case.' }))
-
-    service.rows[0] = { ...review }
-    view.rerender(<TodoSurface service={service} />)
-    await user.click(screen.getByRole('button', { name: 'Back to list' }))
-    await user.click(screen.getByRole('tab', { name: /Pending/ }))
-    await user.click(screen.getByRole('tab', { name: /In progress/ }))
-    await user.click(screen.getByRole('button', { name: /Ship plugin/ }))
-    await user.click(await screen.findByRole('button', { name: '确认完成' }))
-    await user.click(screen.getByRole('button', { name: '停止并继续' }))
+    expect(screen.queryByRole('textbox', { name: 'Change request' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '继续修改' })).toBeNull()
+    await user.click(within(document.querySelector('.dsh-personal-todo-detail-actions') as HTMLElement).getByRole('button', { name: 'Mark complete' }))
+    expect(screen.queryByRole('button', { name: '停止并继续' })).toBeNull()
     await waitFor(() => expect(service.rows[0]).toMatchObject({ status: 'completed' }))
   })
 
-  it('提交结果后仍留在进行中详情，只更新 Agent 信息和确认入口', async () => {
+  it('Agent 空闲后仍留在进行中详情，只刷新运行标识与操作', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     const service = api([todo({
-      status: 'in_progress', primarySessionId: 'session-1', activeRunId: 'run-1',
+      status: 'in_progress', executionStatus: 'running', primarySessionId: 'session-1',
     })])
     render(<TodoSurface service={service} />)
     await user.click(screen.getByRole('button', { name: /personal todos/i }))
@@ -1025,15 +1004,14 @@ describe('PersonalTodoCanvas', () => {
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
 
     service.rows[0] = todo({
-      status: 'in_progress', executionStatus: 'submitted', primarySessionId: 'session-1', activeRunId: 'run-1',
-      latestSummary: 'Ready for review.', reviewRound: 1,
+      status: 'in_progress', executionStatus: 'idle', primarySessionId: 'session-1',
     })
     await vi.advanceTimersByTimeAsync(2_000)
 
     expect(screen.queryByText('No In progress todos.')).toBeNull()
-    expect((await screen.findAllByText('Agent · 结果待确认')).length).toBeGreaterThan(0)
-    expect((await screen.findAllByText('Ready for review.')).length).toBeGreaterThan(0)
-    expect(await screen.findByText('Unit tests passed.')).toBeTruthy()
+    expect((await screen.findAllByText('Agent · 空闲')).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Mark complete' }).length).toBeGreaterThan(0)
   })
 
   it('loads completed history without search or tag filters and deletes from task details', async () => {
@@ -1045,7 +1023,7 @@ describe('PersonalTodoCanvas', () => {
     expect(screen.queryByRole('textbox', { name: 'Filter by tags' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Apply filters' })).toBeNull()
     await user.click(screen.getByRole('tab', { name: /Completed/ }))
-    await waitFor(() => expect(service.list).toHaveBeenLastCalledWith({ statuses: ['completed'], archived: false, needsAttention: false, offset: 0 }, expect.any(AbortSignal)))
+    await waitFor(() => expect(service.list).toHaveBeenLastCalledWith({ statuses: ['completed'], archived: false, offset: 0 }, expect.any(AbortSignal)))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
     await selectDetailMenu(user, 'Delete')
     const dialog = screen.getByRole('dialog', { name: 'Delete todo' })
@@ -1081,7 +1059,7 @@ describe('PersonalTodoCanvas', () => {
   it('archives in-progress todos while preserving their lifecycle state', async () => {
     const user = userEvent.setup()
     const service = api([todo({
-      status: 'in_progress', primarySessionId: 'session-1', activeRunId: 'run-1',
+      status: 'in_progress', executionStatus: 'running', primarySessionId: 'session-1', activeRunId: null,
     })])
     render(<TodoSurface service={service} />)
     await user.click(screen.getByRole('button', { name: /personal todos/i }))

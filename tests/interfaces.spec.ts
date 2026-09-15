@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import PersonalTodoService from '../src/index.ts'
 import { TodoStore } from '../src/host/store.ts'
 import type { TodoAgent } from '../src/host/orchestrator.ts'
+import type { RuntimeEvent } from '../src/host/runtime.ts'
 import { apply as applyTools } from '../src/tools.ts'
 import type { CreateTodoInput, ListTodoInput, UpdateTodoRequest } from '../src/types.ts'
 
@@ -47,14 +48,22 @@ class SessionControllerStub extends Service {
     if (!this.agents.has(sessionId)) {
       let status = this.agentStatus
       const waiters: Array<() => void> = []
-      const finish = () => { status = 'idle'; for (const resolve of waiters.splice(0)) resolve() }
+      const finish = () => {
+        status = 'idle'
+        this.ctx.emit('agent/status', { agent: { id: sessionId }, status } as never)
+        for (const resolve of waiters.splice(0)) resolve()
+      }
       this.agents.set(sessionId, {
         id: sessionId,
         get status() { return status },
         cancel: vi.fn(finish),
         finish,
         whenIdle: () => status === 'idle' ? Promise.resolve() : new Promise(resolve => { waiters.push(resolve) }),
-        followup: message => { status = 'running'; this.messages.push({ sessionId, text: message.content[0].text }) },
+        followup: message => {
+          status = 'running'
+          this.ctx.emit('agent/status', { agent: { id: sessionId }, status } as never)
+          this.messages.push({ sessionId, text: message.content[0].text })
+        },
       })
     }
     return Promise.resolve({ agent: this.agents.get(sessionId)! })
@@ -75,6 +84,12 @@ class SessionsStub extends Service {
   }
 }
 
+class SessionQueryStub extends Service {
+  readonly readSession = vi.fn<(id: string) => Promise<{ events: RuntimeEvent[] }>>()
+    .mockResolvedValue({ events: [] })
+  constructor(ctx: Context) { super(ctx, 'sessionQuery') }
+}
+
 const contexts: Context[] = []
 const temporaryDirectories: string[] = []
 const signal = new AbortController().signal
@@ -90,6 +105,7 @@ async function setup(
   sessionController.agentStatus = agentStatus
   await ctx.plugin(AgentsStub)
   await ctx.plugin(SessionsStub)
+  await ctx.plugin(SessionQueryStub)
   await ctx.plugin(PersonalTodoService, {
     databasePath,
     defaultListLimit: 50,
@@ -113,6 +129,7 @@ async function setup(
     tools: new Map(tools.map(tool => [tool.name, tool])),
     guard,
     inject,
+    query: (ctx as unknown as { sessionQuery: SessionQueryStub }).sessionQuery,
   }
 }
 
@@ -164,9 +181,7 @@ describe('Host Remote service and Agent tools', () => {
       expect(agent.status).toBe('idle')
     }
     expect(sessions.messages).toHaveLength(messages)
-    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).runs[0]).toMatchObject({
-      status: 'cancelled', finishedAt: expect.any(String),
-    })
+    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).runs).toEqual([])
     expect(await ctx.personalTodo.start({ id: todo.id }, signal)).toMatchObject({
       status: 'in_progress', executionStatus: 'running', primarySessionId: started.primarySessionId,
     })
@@ -185,7 +200,7 @@ describe('Host Remote service and Agent tools', () => {
     const stopping = ctx.personalTodo.stop({ id: todo.id }, signal)
     await expect(ctx.personalTodo.start({ id: todo.id }, signal)).rejects.toThrow('正在切换')
     await expect(ctx.personalTodo.archive({ id: todo.id }, signal)).rejects.toThrow('正在切换')
-    expect(() => ctx.personalTodo.submitReview({ id: todo.id, summary: '迟到结果' }, agent.id)).toThrow('正在切换')
+    expect(() => ctx.personalTodo.delete({ id: todo.id }, signal)).toThrow('正在切换')
     agent.finish()
     await stopping
   })
@@ -219,7 +234,9 @@ describe('Host Remote service and Agent tools', () => {
     const before = await ctx.personalTodo.get({ id: todo.id }, signal)
     await expect(ctx.personalTodo.approve({ id: todo.id }, signal)).rejects.toThrow('子 Agent 取消失败')
     await Promise.resolve()
-    expect(await ctx.personalTodo.get({ id: todo.id }, signal)).toEqual(before)
+    expect(await ctx.personalTodo.get({ id: todo.id }, signal)).toEqual({
+      ...before, todo: { ...before.todo, executionStatus: 'stopped' },
+    })
     expect(sessions.agents.get(started.primarySessionId!)!.status).toBe('idle')
   })
 
@@ -239,30 +256,30 @@ describe('Host Remote service and Agent tools', () => {
     expect(sessions.agents.get('late-child')!.status).toBe('idle')
   })
 
-  it('Agent 未提交结果就结束时显示停止，不伪装为完成或继续运行', async () => {
+  it('Agent 正常结束时显示空闲，不猜测完成或等待用户输入', async () => {
     const { ctx, sessions } = await setup()
     const todo = await ctx.personalTodo.create({ title: '意外结束' }, signal)
     const started = await ctx.personalTodo.start({ id: todo.id }, signal)
     sessions.agents.get(started.primarySessionId!)!.finish()
     await vi.waitFor(async () => {
       expect((await ctx.personalTodo.get({ id: todo.id }, signal)).todo).toMatchObject({
-        status: 'in_progress', executionStatus: 'stopped', activeRunId: null, completedAt: null,
+        status: 'in_progress', executionStatus: 'idle', activeRunId: null, completedAt: null,
       })
     })
   })
 
-  it('派发立即结束也能结算执行状态，派发失败允许用户手动接手', async () => {
+  it('派发立即结束显示空闲，创建会话失败不修改待办', async () => {
     const { ctx, sessions } = await setup()
     const immediate = await ctx.personalTodo.create({ title: '立即结束' }, signal)
     const resolved = await sessions.resolveAgent(`personal-todo-${immediate.id}`)
     vi.spyOn(resolved.agent, 'followup').mockImplementation(() => undefined)
-    expect(await ctx.personalTodo.start({ id: immediate.id }, signal)).toMatchObject({ executionStatus: 'stopped', activeRunId: null })
-    expect((await ctx.personalTodo.get({ id: immediate.id }, signal)).todo.executionStatus).toBe('stopped')
+    expect(await ctx.personalTodo.start({ id: immediate.id }, signal)).toMatchObject({ executionStatus: 'idle', activeRunId: null })
+    expect((await ctx.personalTodo.get({ id: immediate.id }, signal)).todo.executionStatus).toBe('idle')
     const failed = await ctx.personalTodo.create({ title: '派发失败' }, signal)
     vi.spyOn(sessions, 'create').mockRejectedValueOnce(new Error('服务不可用'))
     await expect(ctx.personalTodo.start({ id: failed.id }, signal)).rejects.toThrow('服务不可用')
     expect((await ctx.personalTodo.get({ id: failed.id }, signal)).todo).toMatchObject({
-      status: 'in_progress', executionStatus: 'failed', activeRunId: null,
+      status: 'pending', executionStatus: null, activeRunId: null,
     })
     expect(await ctx.personalTodo.approve({ id: failed.id }, signal)).toMatchObject({ status: 'completed' })
   })
@@ -283,7 +300,7 @@ describe('Host Remote service and Agent tools', () => {
     expect(reopened.sessions.messages).toEqual([])
   })
 
-  it('publishes CRUD plus Agent-owned progress, blocking, and review tools', async () => {
+  it('仅发布待办管理及备份工具，不发布同步工具或对话拦截器', async () => {
     const { tools, guard, inject } = await setup()
     expect(guard).not.toHaveBeenCalled()
     expect(inject).not.toHaveBeenCalled()
@@ -291,9 +308,6 @@ describe('Host Remote service and Agent tools', () => {
       'personal_todo_add',
       'personal_todo_list',
       'personal_todo_update',
-      'personal_todo_progress',
-      'personal_todo_block',
-      'personal_todo_submit_review',
       'personal_todo_delete',
       'personal_todo_export',
       'personal_todo_import',
@@ -328,12 +342,11 @@ describe('Host Remote service and Agent tools', () => {
     expect((await ctx.personalTodo.get({ id: added.id }, signal)).todo.priority).toBe(priority ?? 'medium')
   })
 
-  it.each(['pending', 'in_progress', 'blocked'] as const)('现有 approve API 从 %s 完成待办，工具可查询最终状态', async (status) => {
+  it.each(['pending', 'in_progress'] as const)('现有 approve API 从 %s 完成待办，工具可查询最终状态', async (status) => {
     const { ctx, tools } = await setup()
     const todo = await ctx.personalTodo.create({ title: '直接完成' }, signal)
     if (status !== 'pending') {
-      const started = await ctx.personalTodo.start({ id: todo.id }, signal)
-      if (status === 'blocked') await ctx.personalTodo.block({ id: todo.id, question: '请选择' }, started.primarySessionId as string)
+      await ctx.personalTodo.start({ id: todo.id }, signal)
     }
     expect(await ctx.personalTodo.approve({ id: todo.id }, signal)).toMatchObject({
       status: 'completed', completedAt: expect.any(String), activeRunId: null, blockedReason: null, reviewRound: 0,
@@ -369,15 +382,10 @@ describe('Host Remote service and Agent tools', () => {
       '标签：["dsh"]',
     ].join('\n'))
 
-    const agentRun = run(started.primarySessionId as string)
-    expect(await tools.get('personal_todo_progress')?.execute({ id: added.id, message: 'Implemented it' }, agentRun)).toMatchObject({ latestSummary: 'Implemented it' })
-    expect(await tools.get('personal_todo_submit_review')?.execute({
-      id: added.id,
-      summary: 'Ready for review',
-      verification: 'Tests passed',
-      risk: null,
-    }, agentRun)).toMatchObject({ status: 'in_progress', executionStatus: 'submitted' })
-    expect(agentRun.concludeTurn).not.toHaveBeenCalled()
+    sessions.agents.get(started.primarySessionId!)!.finish()
+    expect((await ctx.personalTodo.get({ id: added.id }, signal)).todo).toMatchObject({
+      status: 'in_progress', executionStatus: 'idle', latestSummary: null, blockedReason: null,
+    })
 
     expect(await ctx.personalTodo.approve({ id: added.id }, signal)).toMatchObject({ status: 'completed' })
     const listed = await tools.get('personal_todo_list')?.execute({ statuses: ['completed'] } satisfies ListTodoInput, run())
@@ -409,7 +417,7 @@ describe('Host Remote service and Agent tools', () => {
     ])
   })
 
-  it('resumes a durable in-progress todo after the Host service restarts', async () => {
+  it('重启后只读旧运行记录对应的会话，不自动恢复或改写历史', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'dsh-personal-todo-recovery-'))
     temporaryDirectories.push(directory)
     const databasePath = join(directory, 'todos.sqlite3')
@@ -424,12 +432,13 @@ describe('Host Remote service and Agent tools', () => {
     persisted.beginRun(todo.id, 'run-1', 'session-1')
     persisted.close()
 
-    const { ctx, sessions } = await setup(databasePath)
-    await vi.waitFor(() => { expect(sessions.messages).toHaveLength(1) })
+    const { ctx, sessions, query } = await setup(databasePath)
+    query.readSession.mockResolvedValue({ events: [{ type: 'turn/start' }] })
+    const result = await ctx.personalTodo.get({ id: todo.id }, signal)
     expect(sessions.created).toEqual([])
-    expect(sessions.messages[0]).toMatchObject({ sessionId: 'session-1' })
-    expect(sessions.messages[0]?.text).toContain('DSH 服务重启后')
-    expect(await ctx.personalTodo.get({ id: todo.id }, signal)).toMatchObject({ todo: { status: 'in_progress' } })
+    expect(sessions.resolved).toEqual([])
+    expect(sessions.messages).toEqual([])
+    expect(result).toMatchObject({ todo: { status: 'in_progress', executionStatus: 'stopped' }, runs: [{ status: 'running' }] })
   })
 
   it('does not duplicate restart work already owned by a running Agent', async () => {
@@ -447,8 +456,12 @@ describe('Host Remote service and Agent tools', () => {
     persisted.beginRun(todo.id, 'run-1', 'session-1')
     persisted.close()
 
-    const { sessions } = await setup(databasePath, 'running')
-    await vi.waitFor(() => { expect(sessions.resolved).toEqual(['session-1']) })
+    const { ctx, sessions, query } = await setup(databasePath, 'running')
+    await sessions.resolveAgent('session-1')
+    sessions.resolved.length = 0
+    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).todo.executionStatus).toBe('running')
+    expect(sessions.resolved).toEqual([])
+    expect(query.readSession).not.toHaveBeenCalled()
     expect(sessions.messages).toEqual([])
   })
 
@@ -459,31 +472,56 @@ describe('Host Remote service and Agent tools', () => {
     expect(sessions.messages[0]?.text).toContain('备注：无补充备注。\n负责人：未分配。\n优先级：未设置\n截止时间：未设置\n标签：无')
   })
 
-  it('surfaces an Agent question in the todo and delivers the user reply to the same Session', async () => {
-    const { ctx, sessions, tools } = await setup()
-    const todo = await ctx.personalTodo.create({ title: 'Clarify' }, signal)
+  it('宿主通知只更新展示，不写 Run、问题或摘要，不发送消息', async () => {
+    const { ctx, sessions } = await setup()
+    const todo = await ctx.personalTodo.create({ title: '正常对话' }, signal)
     const started = await ctx.personalTodo.start({ id: todo.id }, signal)
-    const agentRun = run(started.primarySessionId as string)
-
-    expect(await tools.get('personal_todo_block')?.execute({ id: todo.id, question: 'Which option?' }, agentRun)).toMatchObject({
-      status: 'in_progress', executionStatus: 'waiting_input', blockedReason: 'Which option?',
-    })
-    expect(agentRun.concludeTurn).not.toHaveBeenCalled()
-    expect(await ctx.personalTodo.reply({ id: todo.id, message: 'Use option A.' }, signal)).toMatchObject({ status: 'in_progress' })
-    expect(sessions.messages.at(-1)?.text).toContain('Use option A.')
+    const before = await ctx.personalTodo.exportData({}, signal)
+    const agent = sessions.agents.get(started.primarySessionId!)!
+    ctx.emit('session/event', { id: agent.id } as never, { type: 'turn/end', data: { reason: { kind: 'error' } } } as never)
+    agent.finish()
+    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).todo.executionStatus).toBe('failed')
+    ctx.emit('agent/status', { agent, status: 'running' } as never)
+    ctx.emit('session/event', { id: agent.id } as never, { type: 'turn/end', data: { reason: { kind: 'completed' } } } as never)
+    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).todo.executionStatus).toBe('idle')
+    expect(JSON.parse((await ctx.personalTodo.exportData({}, signal)).json).todos).toEqual(JSON.parse(before.json).todos)
+    expect(sessions.created).toHaveLength(1)
+    expect(sessions.messages).toHaveLength(1)
+    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).runs).toEqual([])
   })
 
-  it('returns review feedback to the existing root Session', async () => {
+  it('派发中同步结束或失败的通知不会被启动操作覆盖', async () => {
     const { ctx, sessions } = await setup()
-    const todo = await ctx.personalTodo.create({ title: 'Revise' }, signal)
-    const started = await ctx.personalTodo.start({ id: todo.id }, signal)
-    await ctx.personalTodo.submitReview({ id: todo.id, summary: 'First pass' }, started.primarySessionId as string)
+    const todo = await ctx.personalTodo.create({ title: '立即失败' }, signal)
+    const { agent } = await sessions.resolveAgent(`personal-todo-${todo.id}`)
+    vi.spyOn(agent, 'followup').mockImplementation(() => {
+      ctx.emit('agent/error', { agent, error: new Error('执行失败') } as never)
+      ctx.emit('agent/status', { agent, status: 'idle' } as never)
+    })
+    expect(await ctx.personalTodo.start({ id: todo.id }, signal)).toMatchObject({
+      status: 'in_progress', executionStatus: 'failed', activeRunId: null,
+    })
+    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).runs).toEqual([])
+  })
 
-    const revised = await ctx.personalTodo.requestChanges({ id: todo.id, feedback: 'Add coverage.' }, signal)
-    expect(revised).toMatchObject({ status: 'in_progress', primarySessionId: started.primarySessionId })
-    expect(sessions.created).toHaveLength(1)
-    expect(sessions.messages.at(-1)?.text).toContain('Add coverage.')
-    expect((await ctx.personalTodo.get({ id: todo.id }, signal)).runs).toHaveLength(2)
+  it('冷读期间取消不返回过期数据，且不激活会话', async () => {
+    const source = await setup()
+    const todo = await source.ctx.personalTodo.create({ title: '冷读取消' }, signal)
+    await source.ctx.personalTodo.start({ id: todo.id }, signal)
+    const backup = await source.ctx.personalTodo.exportData({}, signal)
+    const target = await setup()
+    await target.ctx.personalTodo.importData({ json: backup.json }, signal)
+    let finish!: (value: { events: RuntimeEvent[] }) => void
+    target.query.readSession.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const controller = new AbortController()
+    const reading = target.ctx.personalTodo.get({ id: todo.id }, controller.signal)
+    await Promise.resolve()
+    controller.abort(new Error('已取消'))
+    finish({ events: [] })
+    await expect(reading).rejects.toThrow('已取消')
+    expect(target.sessions.created).toEqual([])
+    expect(target.sessions.resolved).toEqual([])
+    expect(target.sessions.messages).toEqual([])
   })
 
   it('面板接口与 Agent 工具共用备份规则，导入不派发会话且重启不自动恢复', async () => {
@@ -499,10 +537,10 @@ describe('Host Remote service and Agent tools', () => {
     const path = join(directory, 'todos.sqlite3')
     const target = await setup(path)
     expect(await target.tools.get('personal_todo_import')!.execute({ json: exported.json }, run()))
-      .toEqual({ imported: 1, skipped: 0, resetToPending: 1 })
+      .toEqual({ imported: 1, skipped: 0, resetToPending: 0 })
     expect(await target.ctx.personalTodo.importData({ json: exported.json }, signal))
       .toEqual({ imported: 0, skipped: 1, resetToPending: 0 })
-    expect((await target.ctx.personalTodo.get({ id: todo.id }, signal)).todo.status).toBe('pending')
+    expect((await target.ctx.personalTodo.get({ id: todo.id }, signal)).todo.status).toBe('in_progress')
     expect(target.sessions.created).toEqual([])
     expect(target.sessions.messages).toEqual([])
     expect(target.sessions.resolved).toEqual([])
@@ -522,7 +560,6 @@ describe('Host Remote service and Agent tools', () => {
     const { ctx, tools } = await setup()
     await expect(tools.get('personal_todo_add')?.execute({}, run())).rejects.toThrow('title')
     await expect(tools.get('personal_todo_update')?.execute({ id: 'missing' } satisfies Partial<UpdateTodoRequest>, run())).rejects.toThrow('at least one editable field')
-    await expect(tools.get('personal_todo_progress')?.execute({ id: 'missing', message: 'x' }, run())).rejects.toThrow('require an Agent Session')
     await expect(tools.get('personal_todo_delete')?.execute({ id: 'missing' }, run())).rejects.toThrow('was not found')
 
     const controller = new AbortController()

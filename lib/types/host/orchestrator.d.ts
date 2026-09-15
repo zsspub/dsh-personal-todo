@@ -1,6 +1,7 @@
-/** 基于 Host 普通会话服务编排待办的启动与恢复。 */
-import type { ReplyTodoRequest, RequestTodoChangesRequest, Todo, TodoStatus } from '../types.ts';
+/** 仅在用户明确操作时启动或停止待办关联会话。 */
+import type { Todo, TodoStatus } from '../types.ts';
 import { TodoStore } from './store.ts';
+import type { TodoRuntime } from './runtime.ts';
 export interface TodoAgent {
     readonly id: string;
     readonly status: 'idle' | 'running';
@@ -42,37 +43,23 @@ export interface TodoSessionController {
 interface TodoOrchestratorConfig {
     readonly agentPreset?: string;
 }
-/** 启动和恢复每条待办所属的唯一普通根会话。 */
+/** 显式操作与被动运行状态观察分离。 */
 export declare class TodoOrchestrator {
     private readonly store;
     private readonly sessions;
     private readonly config;
     private readonly agents;
+    private readonly runtime;
     private readonly changing;
-    private readonly idleRuns;
-    private readonly observations;
-    private disposed;
-    constructor(store: TodoStore, sessions: TodoSessionController, config: TodoOrchestratorConfig, agents: TodoAgentRegistry);
-    dispose(): void;
+    constructor(store: TodoStore, sessions: TodoSessionController, config: TodoOrchestratorConfig, agents: TodoAgentRegistry, runtime: TodoRuntime);
     assertAvailable(id: string): void;
     private exclusive;
-    private settleIdle;
-    private observe;
     private stopAgents;
     setStatus(id: string, status: TodoStatus): Promise<Todo>;
     stop(id: string): Promise<Todo>;
     archive(id: string): Promise<Todo>;
-    private deliver;
-    /** 恢复已持久化且 Agent 尚未运行的执行中待办。 */
-    recover(signal: AbortSignal): Promise<void>;
     /** 创建或复用根会话，并派发一条待处理待办。 */
     start(id: string): Promise<Todo>;
     private startRun;
-    /** 将用户回复发送到被阻塞待办的根会话。 */
-    reply(request: ReplyTodoRequest): Promise<Todo>;
-    private replyRun;
-    /** 携带用户审核意见，在同一根会话中开始新一轮执行。 */
-    requestChanges(request: RequestTodoChangesRequest): Promise<Todo>;
-    private changeRun;
 }
 export {};

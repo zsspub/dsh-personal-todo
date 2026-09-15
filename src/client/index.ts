@@ -101,11 +101,6 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         if (!result.ok) throw remoteFailure(result)
         return result.value
       },
-      reply: async (request, signal) => {
-        const result = await scope.remote.personalTodo.reply(request, signal)
-        if (!result.ok) throw remoteFailure(result)
-        return result.value
-      },
       approve: async (id, signal) => {
         const result = await scope.remote.personalTodo.approve({ id }, signal)
         if (!result.ok) throw remoteFailure(result)
@@ -118,11 +113,6 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       },
       restore: async (id, signal) => {
         const result = await scope.remote.personalTodo.restore({ id }, signal)
-        if (!result.ok) throw remoteFailure(result)
-        return result.value
-      },
-      requestChanges: async (request, signal) => {
-        const result = await scope.remote.personalTodo.requestChanges(request, signal)
         if (!result.ok) throw remoteFailure(result)
         return result.value
       },

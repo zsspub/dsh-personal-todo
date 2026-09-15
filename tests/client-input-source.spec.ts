@@ -91,7 +91,7 @@ describe('todo input references', () => {
     const late = new AbortController()
     list.mockImplementationOnce(async () => {
       late.abort()
-      return { todos: [], total: 0, hasMore: false, counts: { pending: 0, inProgress: 0, needsAttention: 0, completed: 0, cancelled: 0, archived: 0 } }
+      return { todos: [], total: 0, hasMore: false, counts: { pending: 0, inProgress: 0, completed: 0, cancelled: 0, archived: 0 } }
     })
     await expect(source.candidates(session, request('todo/pending/', late.signal))).rejects.toThrow()
   })

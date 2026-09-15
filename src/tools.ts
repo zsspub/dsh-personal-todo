@@ -1,4 +1,4 @@
-/** 面向模型的待办创建、查询、编辑、进度、阻塞和审核工具。 */
+/** 面向模型的待办管理工具；不参与 Agent 对话执行流程。 */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -17,7 +17,7 @@ const TODO_SCHEMA = {
     notes: { ...NULLABLE_STRING, required: true },
     assignee: { ...NULLABLE_STRING, required: true },
     status: { type: 'string', enum: [...TODO_STATUSES], required: true },
-    executionStatus: { oneOf: [{ type: 'string', enum: ['running', 'waiting_input', 'submitted', 'failed', 'stopped'] }, { type: 'null' }], required: true },
+    executionStatus: { oneOf: [{ type: 'string', enum: ['running', 'idle', 'failed', 'stopped', 'unavailable'] }, { type: 'null' }], required: true },
     priority: { type: 'string', enum: [...TODO_PRIORITIES], required: true },
     dueAt: { ...NULLABLE_STRING, required: true },
     tags: { type: 'array', items: { type: 'string' }, required: true },
@@ -43,12 +43,7 @@ const CREATE_PARAMETERS = {
   tags: { type: 'array', items: { type: 'string' }, description: 'Up to 20 tags.' },
 } as const
 
-function primarySessionId(exec: { readonly agent?: { readonly id: string } }): string {
-  if (exec.agent === undefined) throw new Error('personal todo lifecycle tools require an Agent Session')
-  return exec.agent.id
-}
-
-/** 注册个人待办的增删改查及 Agent 专属生命周期工具。 */
+/** 注册用户按需调用的待办管理与备份工具。 */
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'personal_todo_add',
@@ -64,7 +59,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'personal_todo_list',
-    description: '查询持久待办。默认返回待办和进行中任务，不含归档。status 表示任务进度，executionStatus 表示最近一轮 Agent 执行信息，两者独立。',
+    description: '查询持久待办。默认返回待办和进行中任务，不含归档。status 由用户管理，executionStatus 来自宿主会话运行状态，不代表任务完成。',
     parameters: {
       statuses: {
         type: 'array',
@@ -82,7 +77,6 @@ export function apply(ctx: Context): void {
       limit: { type: 'integer', description: 'Page size; deployment maximum defaults to 200.' },
       offset: { type: 'integer', description: 'Zero-based row offset.' },
       archived: { type: 'boolean', description: 'When true, return archived todos instead of normal history.' },
-      needsAttention: { type: 'boolean', description: '只显示 Agent 正在等待用户回复或确认结果的任务。' },
     },
     output: {
       schema: {
@@ -98,7 +92,6 @@ export function apply(ctx: Context): void {
             properties: {
               pending: { type: 'integer', required: true },
               inProgress: { type: 'integer', required: true },
-              needsAttention: { type: 'integer', required: true },
               completed: { type: 'integer', required: true },
               cancelled: { type: 'integer', required: true },
               archived: { type: 'integer', required: true },
@@ -134,59 +127,6 @@ export function apply(ctx: Context): void {
       return ctx.personalTodo.update({ id, patch }, exec.signal)
     },
     presentCall: args => ({ card: 'generic', title: `Update todo ${args.id}`, kind: 'other', rawInput: args }),
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'personal_todo_progress',
-    description: '记录当前 Agent 会话所属待办的关键进展，并在对话正文中向用户简洁汇报；活动记录不能代替正文。',
-    parameters: {
-      id: { type: 'string', required: true, description: 'Todo id supplied in the task prompt.' },
-      message: { type: 'string', required: true, description: 'Concise milestone or current work phase.' },
-    },
-    output: {
-      schema: TODO_SCHEMA,
-      render: (_args, todo) => [{ type: 'text', text: JSON.stringify(todo) }],
-    },
-    execute: (args, exec) => ctx.personalTodo.reportProgress(args, primarySessionId(exec)),
-    presentCall: args => ({ card: 'generic', title: `Update todo progress: ${args.id}`, kind: 'other', rawInput: args }),
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'personal_todo_block',
-    description: '记录需要用户回答的明确问题，将 Agent 执行信息设为等待回复，任务仍为进行中。成功后在对话正文中提出同一问题并结束本轮，等待用户输入。',
-    parameters: {
-      id: { type: 'string', required: true, description: 'Todo id supplied in the task prompt.' },
-      question: { type: 'string', required: true, description: 'The exact question the user must answer.' },
-    },
-    output: {
-      schema: TODO_SCHEMA,
-      render: (_args, todo) => [{ type: 'text', text: JSON.stringify(todo) }],
-    },
-    execute: async (args, exec) => {
-      const todo = await ctx.personalTodo.block(args, primarySessionId(exec))
-      return todo
-    },
-    presentCall: args => ({ card: 'generic', title: `Block todo for input: ${args.id}`, kind: 'other', rawInput: args }),
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'personal_todo_submit_review',
-    description: '提交结果供用户确认，任务仍为进行中，不会自动完成。成功后必须输出最终正文，说明结果、验证和遗留风险，再结束本轮等待用户确认。',
-    parameters: {
-      id: { type: 'string', required: true, description: 'Todo id supplied in the task prompt.' },
-      summary: { type: 'string', required: true, description: 'Concise description of the completed outcome.' },
-      verification: { ...NULLABLE_STRING, description: 'Checks performed and their results.' },
-      risk: { ...NULLABLE_STRING, description: 'Remaining risks or limitations, or null when none are known.' },
-    },
-    output: {
-      schema: TODO_SCHEMA,
-      render: (_args, todo) => [{ type: 'text', text: JSON.stringify(todo) }],
-    },
-    execute: async (args, exec) => {
-      const todo = await ctx.personalTodo.submitReview(args, primarySessionId(exec))
-      return todo
-    },
-    presentCall: args => ({ card: 'generic', title: `Submit todo for review: ${args.id}`, kind: 'other', rawInput: args }),
   }))
 
   ctx.tools.register(defineTool({

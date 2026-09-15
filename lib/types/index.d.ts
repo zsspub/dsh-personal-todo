@@ -3,8 +3,9 @@ import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { type TodoSessionController } from './host/orchestrator.ts';
+import { type RuntimeEvent } from './host/runtime.ts';
 import { type JournalMode } from './host/store.ts';
-import type { BlockTodoRequest, CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, ReplyTodoRequest, ReportTodoProgressRequest, RequestTodoChangesRequest, SubmitTodoReviewRequest, Todo, TodoDetail, TodoIdRequest, TodoListResult, UpdateTodoRequest, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, SetTodoStatusRequest } from './types.ts';
+import type { CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, LiveTodo as Todo, LiveTodoDetail as TodoDetail, TodoIdRequest, LiveTodoListResult as TodoListResult, UpdateTodoRequest, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, SetTodoStatusRequest } from './types.ts';
 export type * from './types.ts';
 export { PERSONAL_TODO_SCHEMA_VERSION, PersonalTodoError, TodoStore } from './host/store.ts';
 export type { JournalMode, TodoStoreConfig } from './host/store.ts';
@@ -21,6 +22,26 @@ declare module '@deepseek-ai/cordis' {
                 readonly parentSession?: string;
             };
         }): void;
+        'agent/status'(payload: {
+            readonly agent: {
+                readonly id: string;
+            };
+            readonly status: 'running' | 'idle';
+        }): void;
+        'agent/error'(payload: {
+            readonly agent: {
+                readonly id: string;
+            };
+            readonly error: unknown;
+        }): void;
+        'agent/disposed'(payload: {
+            readonly agent: {
+                readonly id: string;
+            };
+        }): void;
+        'session/event'(session: {
+            readonly id: string;
+        }, event: RuntimeEvent): void;
     }
 }
 /** 个人待办数据库及列表数量限制的部署配置。 */
@@ -39,8 +60,10 @@ export declare class PersonalTodoService extends TypertRemoteService {
     static Config: z<Config>;
     private readonly store;
     private readonly orchestrator;
+    private readonly runtime;
     /** @param ctx - 发布 personalTodo Remote 命名空间的 Host 上下文。 @param config - 已校验的数据库配置。 */
     constructor(ctx: Context, config: Config);
+    private present;
     /** 查询一页待办；在开始同步 SQLite 操作前检查取消信号。 */
     list(request: ListTodoInput, signal: AbortSignal): Promise<TodoListResult>;
     exportData(_request: ExportTodoDataRequest, signal: AbortSignal): Promise<ExportTodoDataResult>;
@@ -53,8 +76,6 @@ export declare class PersonalTodoService extends TypertRemoteService {
     update(request: UpdateTodoRequest, signal: AbortSignal): Promise<Todo>;
     /** 在待办的持久化根会话中启动一条待处理任务。 */
     start(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
-    /** 使用用户回复继续执行被阻塞的待办。 */
-    reply(request: ReplyTodoRequest, signal: AbortSignal): Promise<Todo>;
     /** 用户确认完成任务；先停止活动执行并保留历史。 */
     approve(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
     setStatus(request: SetTodoStatusRequest, signal: AbortSignal): Promise<Todo>;
@@ -63,14 +84,6 @@ export declare class PersonalTodoService extends TypertRemoteService {
     archive(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
     /** 将归档待办恢复到对应生命周期列表。 */
     restore(request: TodoIdRequest, signal: AbortSignal): Promise<Todo>;
-    /** 将用户修改意见发回待办的根会话。 */
-    requestChanges(request: RequestTodoChangesRequest, signal: AbortSignal): Promise<Todo>;
-    /** 记录待办主 Agent 会话汇报的进度节点。 */
-    reportProgress(request: ReportTodoProgressRequest, sessionId: string): Promise<Todo>;
-    /** 根据主 Agent 会话提出的问题暂停待办。 */
-    block(request: BlockTodoRequest, sessionId: string): Promise<Todo>;
-    /** 提交主 Agent 会话的执行结果，等待用户审核。 */
-    submitReview(request: SubmitTodoReviewRequest, sessionId: string): Promise<Todo>;
     /** 永久删除一条待办。 */
     delete(request: DeleteTodoRequest, signal: AbortSignal): Promise<DeleteTodoResult>;
 }
