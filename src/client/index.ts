@@ -2,15 +2,18 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type { ISessions, SessionId, SubagentAddress } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import personalTodoRemote from 'dsh-personal-todo/remote'
 import {
   PersonalTodoCanvas, PersonalTodoTrigger, type PersonalTodoPanelInjected,
@@ -21,7 +24,7 @@ import { PersonalTodoDataCenter, type PersonalTodoRemoteApi } from './data-cente
 import { createTodoInputSource } from './input-source.ts'
 import { installTodoInputIcon } from './input-source-icon.ts'
 import { en, NS, zh, type PersonalTodoKey } from './locales.ts'
-import { personalTodoTurnDefinition, selectPersonalTodoTail } from './turn-todos.ts'
+import { personalTodoTurnDefinition } from './turn-todos.ts'
 
 export { PersonalTodoCanvas, PersonalTodoTrigger } from './PersonalTodoPanel.tsx'
 export type {
@@ -40,7 +43,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 export const inject = [
-  'slots', 'locale', 'remote', 'sessions', 'sidebarRight', 'sidebarRightTabs', 'uiConversation',
+  'slots', 'locale', 'remote', 'sessions', 'uiWorkspace',
+  'sidebarRight', 'sidebarRightTabs', 'uiConversation',
 ]
 
 function remoteFailure(result: { readonly error: { readonly message: string; readonly code: string } }): Error {
@@ -125,21 +129,19 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const openSession = async (id: string, parentId: string | null): Promise<boolean> => {
       const sessionId = id as SessionId
       if (parentId === null) {
-        sessions.open(sessionId)
+        scope.uiWorkspace.openSession(sessionId)
         return true
       }
       const retained = sessions.subagentAddress(sessionId)
       if (retained !== undefined) {
-        sessions.openSubagent(retained)
+        scope.uiWorkspace.openSession(retained)
         return true
       }
       const parentSessionId = parentId as SessionId
-      sessions.open(parentSessionId)
       await sessions.refreshSubagents(parentSessionId)
-      const child = sessions.list.getSnapshot().subagentsByParent[parentSessionId]?.entries
-        .find(entry => entry.kind === 'child' && entry.id === sessionId)
-      if (child?.kind !== 'child') return false
-      sessions.openSubagent({ parentSessionId, childSessionId: sessionId, mode: child.mode } satisfies SubagentAddress)
+      const child = sessions.subagentAddress(sessionId)
+      if (child === undefined) return false
+      scope.uiWorkspace.openSession(child)
       return true
     }
     const panel = (): PersonalTodoPanelInjected => ({
@@ -208,8 +210,8 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     }, PersonalTodoCanvas))
     scope.slots.inject('conversation.chat.turnTail', () => scope.slots.register({
       name: 'conversation.chat.turnTail',
-      priority: -20,
-      select: selectPersonalTodoTail,
+      id: 'personal-todo-turn-tail',
+      order: -20,
       locale: NS,
       inject: (): TodoTurnTailInjected => ({
         dataCenter,

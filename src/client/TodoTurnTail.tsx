@@ -6,7 +6,7 @@ import type { ToolResultNode } from '@deepseek-ai/dsh-client-ui-conversation/cli
 import { TodoToolCard } from './TodoToolCard.tsx'
 import type { PersonalTodoDataCenter } from './data-center.ts'
 import { NS } from './locales.ts'
-import type { PersonalTodoTurnResult } from './turn-todos.ts'
+import { selectPersonalTodoTail, type PersonalTodoTurnResult } from './turn-todos.ts'
 
 export interface TodoTurnTailInjected {
   readonly dataCenter: PersonalTodoDataCenter
@@ -17,7 +17,6 @@ export type TodoTurnTailProps =
   PropsRuntime<'conversation.chat.turnTail'>
   & PropsLocale<typeof NS>
   & TodoTurnTailInjected
-  & { readonly matched: PersonalTodoTurnResult }
 
 function blockOf(result: PersonalTodoTurnResult): ToolResultNode {
   return {
@@ -39,8 +38,10 @@ function blockOf(result: PersonalTodoTurnResult): ToolResultNode {
 
 /** 将回合投影恢复为现有待办卡片所需的稳定展示模型。 */
 export function TodoTurnTail({
-  matched, dataCenter, openSession, t,
+  dataCenter, openSession, t, ...owner
 }: TodoTurnTailProps) {
+  const matched = selectPersonalTodoTail(owner)
+  if (matched === null) return null
   return (
     <TodoToolCard
       block={blockOf(matched)}

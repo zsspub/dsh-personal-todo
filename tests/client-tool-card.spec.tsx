@@ -258,11 +258,20 @@ describe('TodoToolCard', () => {
     }
 
     render(<TodoTurnTail {...{
-      matched: {
-        callId: 'tail-call',
-        seq: 11,
-        meta: personalTodoPresentationMeta({ statuses: ['pending'] }, result),
+      seq: 11,
+      turn: {
+        status: 'closed',
+        data: {
+          get: () => ({
+            results: [{
+              callId: 'tail-call',
+              seq: 11,
+              meta: personalTodoPresentationMeta({ statuses: ['pending'] }, result),
+            }],
+          }),
+        },
       },
+      openFile: vi.fn(),
       dataCenter: center,
       openSession: vi.fn(async () => true),
       t,

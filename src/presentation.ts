@@ -1,7 +1,7 @@
 /** 对话内待办卡片的持久化展示数据。 */
 
 import type { ListTodoInput, Todo, TodoListResult } from './types.ts'
-import type { JsonValue } from '@deepseek-ai/dsh-tools'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 export const TODO_PRESENTATION_VERSION = 1
 export const TODO_PRESENTATION_SNAPSHOT_LIMIT = 50

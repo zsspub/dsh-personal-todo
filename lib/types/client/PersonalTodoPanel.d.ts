@@ -27,6 +27,6 @@ export interface PersonalTodoPanelInjected {
 export type PersonalTodoTriggerProps = PropsRuntime<'sidebar.footer.action'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected;
 export type PersonalTodoCanvasProps = PropsRuntime<'sidebar.right.pane.tab'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected;
 /** 打开待办面板并提示待处理事项的侧栏入口。 */
-export declare function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCanvas, useSessions }: PersonalTodoTriggerProps): React.JSX.Element;
+export declare function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCanvas }: PersonalTodoTriggerProps): React.JSX.Element;
 /** 渲染在宿主右侧 Sidebar Tab 中的个人待办面板。 */
 export declare function PersonalTodoCanvas(props: PersonalTodoCanvasProps): React.JSX.Element;

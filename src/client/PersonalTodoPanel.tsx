@@ -219,10 +219,9 @@ function normalizedAssignee(value: string): string | null {
 }
 
 /** 打开待办面板并提示待处理事项的侧栏入口。 */
-export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCanvas, useSessions }: PersonalTodoTriggerProps) {
+export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCanvas }: PersonalTodoTriggerProps) {
   const snapshot = useSyncExternalStore(canvas.subscribe, canvas.getSnapshot)
   const countQuery = useMemo(() => dataCenter?.query({ limit: 1 }, 'paged'), [dataCenter])
-  const hasCurrentSession = useSessions(state => state.current !== undefined)
 
   useEffect(() => {
     if (countQuery !== undefined) {
@@ -261,7 +260,6 @@ export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCan
           aria-label={triggerLabel}
           title={triggerLabel}
           data-wide={wide}
-          disabled={!hasCurrentSession}
           onClick={openCanvas}
         >
           <ListTodo size={wide ? 16 : 18} aria-hidden="true" />

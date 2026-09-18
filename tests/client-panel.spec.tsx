@@ -244,7 +244,7 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
   }
 }
 
-function TodoSurface({ service, wide = true, current = true }: { service: PersonalTodoPanelInjected; wide?: boolean; current?: boolean }) {
+function TodoSurface({ service, wide = true }: { service: PersonalTodoPanelInjected; wide?: boolean }) {
   const snapshot = useSyncExternalStore(service.canvas.subscribe, service.canvas.getSnapshot)
   const surfaceService: PersonalTodoPanelInjected = {
     ...service,
@@ -259,7 +259,6 @@ function TodoSurface({ service, wide = true, current = true }: { service: Person
         wide,
         t,
         ...surfaceService,
-        useSessions: (select: (state: { current?: string }) => unknown) => select(current ? { current: 'session-1' } : {}),
       } as ComponentProps<typeof PersonalTodoTrigger>} />
       <div data-testid="frame">
         <div data-sidebar-right-panel>
@@ -627,14 +626,14 @@ describe('PersonalTodoCanvas', () => {
     expect(Object.keys(en).sort()).toEqual(Object.keys(zh).sort())
   })
 
-  it('没有当前会话时禁用入口，避免调用未挂载的右栏服务', async () => {
+  it('没有当前会话时允许入口处理宿主尚未挂载的右栏服务', async () => {
     const user = userEvent.setup()
     const service = api()
-    render(<TodoSurface service={service} current={false} />)
+    render(<TodoSurface service={service} />)
     const trigger = screen.getByRole('button', { name: /personal todos/i })
-    expect((trigger as HTMLButtonElement).disabled).toBe(true)
+    expect((trigger as HTMLButtonElement).disabled).toBe(false)
     await user.click(trigger)
-    expect(service.openCanvas).not.toHaveBeenCalled()
+    expect(service.openCanvas).toHaveBeenCalledOnce()
   })
 
   it('renders a full-width text action in a wide sidebar and an icon in a narrow sidebar', () => {
