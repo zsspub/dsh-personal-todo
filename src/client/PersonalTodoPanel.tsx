@@ -15,8 +15,10 @@ import { TODO_STATUSES } from '../types.ts'
 import type { ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, SetTodoStatusRequest } from '../types.ts'
 import { parseTodoBackup, TODO_BACKUP_MAX_BYTES } from '../backup.ts'
 import { Database, Download, Upload } from 'lucide-react'
+import type { PersonalTodoDataCenter, TodoQuerySnapshot } from './data-center.ts'
 import type { PersonalTodoCanvasController } from './canvas.ts'
 import type { NS } from './locales.ts'
+import { requiresAgentStop, todoActionState, type TodoLifecycleAction } from './todo-actions.ts'
 
 // 插槽渲染器为列表插槽设置内联 display: contents。
 // 宽侧栏下将包裹层恢复为布局容器，使每个底部操作独占一行。
@@ -95,6 +97,7 @@ const CSS = `
 `
 
 export interface PersonalTodoPanelInjected {
+  readonly dataCenter?: PersonalTodoDataCenter
   readonly canvas: PersonalTodoCanvasController
   readonly openCanvas: () => void
   readonly list: (request: ListTodoInput, signal: AbortSignal) => Promise<TodoListResult>
@@ -139,6 +142,18 @@ interface AssigneeGroup {
 
 const EMPTY_FORM: FormState = { title: '', notes: '', assignee: '', priority: 'none', dueLocal: '', tags: '' }
 const ACTIVE_REFRESH_MS = 2_000
+const EMPTY_ENTITIES: Readonly<Record<string, Todo>> = {}
+const EMPTY_DETAILS: Readonly<Record<string, TodoDetail>> = {}
+const EMPTY_QUERY: TodoQuerySnapshot = {
+  ids: [],
+  total: 0,
+  counts: { pending: 0, inProgress: 0, completed: 0, cancelled: 0, archived: 0 },
+  hasMore: false,
+  loading: false,
+  refreshing: false,
+  error: undefined,
+  updatedAt: undefined,
+}
 const STATUS_ICONS = {
   pending: CircleDashed,
   in_progress: CircleDot,
@@ -204,11 +219,17 @@ function normalizedAssignee(value: string): string | null {
 }
 
 /** 打开待办面板并提示待处理事项的侧栏入口。 */
-export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, useSessions }: PersonalTodoTriggerProps) {
+export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCanvas, useSessions }: PersonalTodoTriggerProps) {
   const snapshot = useSyncExternalStore(canvas.subscribe, canvas.getSnapshot)
+  const countQuery = useMemo(() => dataCenter?.query({ limit: 1 }, 'paged'), [dataCenter])
   const hasCurrentSession = useSessions(state => state.current !== undefined)
 
   useEffect(() => {
+    if (countQuery !== undefined) {
+      const unlisten = countQuery.subscribe(() => undefined)
+      void countQuery.refresh().catch(() => undefined)
+      return unlisten
+    }
     let controller: AbortController | undefined
     const refresh = (): void => {
       controller?.abort()
@@ -224,7 +245,7 @@ export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, useSess
       window.clearInterval(interval)
       controller?.abort()
     }
-  }, [canvas, list])
+  }, [canvas, countQuery, list])
 
   const triggerLabel = snapshot.attentionCount === 0
     ? t('trigger.aria')
@@ -257,7 +278,7 @@ export function PersonalTodoTrigger({ wide, t, list, canvas, openCanvas, useSess
 /** 渲染在宿主右侧 Sidebar Tab 中的个人待办面板。 */
 export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const {
-    t, canvas, list, get, create, update, start, approve, archive, restore,
+    t, dataCenter, canvas, list, get, create, update, start, approve, archive, restore,
     delete: deleteTodo, openSession, useTabInfo, exportData, importData, setStatus, stop,
   } = props
   // 同时兼容已发布版的 codeLabels 与新版 Host 的 labels 接口。
@@ -268,11 +289,28 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const markdown = (text: string): React.ReactNode => <div className="dsh-personal-todo-markdown"><MarkdownText text={text} {...markdownProps} /></div>
   const { tab } = useTabInfo()
   const [view, setView] = useState<View>('pending')
-  const [todos, setTodos] = useState<Todo[]>([])
-  const [result, setResult] = useState<TodoListResult>()
+  const sharedQuery = useMemo(() => dataCenter?.query({
+    statuses: view === 'archived' ? TODO_STATUSES : [view],
+    archived: view === 'archived',
+  }, 'paged'), [dataCenter, view])
+  const querySnapshot = useSyncExternalStore(
+    sharedQuery?.subscribe ?? (() => () => undefined),
+    sharedQuery?.getSnapshot ?? (() => EMPTY_QUERY),
+  )
+  const entities = useSyncExternalStore(
+    dataCenter === undefined ? (() => () => undefined) : listener => dataCenter.entities.listen(listener),
+    dataCenter?.entities.get ?? (() => EMPTY_ENTITIES),
+  )
+  const details = useSyncExternalStore(
+    dataCenter === undefined ? (() => () => undefined) : listener => dataCenter.details.listen(listener),
+    dataCenter?.details.get ?? (() => EMPTY_DETAILS),
+  )
+  const canvasSnapshot = useSyncExternalStore(canvas.subscribe, canvas.getSnapshot)
+  const [localTodos, setLocalTodos] = useState<Todo[]>([])
+  const [localResult, setLocalResult] = useState<TodoListResult>()
   const [selectedId, setSelectedId] = useState<string>()
   const selectedIdRef = useRef<string>()
-  const [detail, setDetail] = useState<TodoDetail>()
+  const [localDetail, setLocalDetail] = useState<TodoDetail>()
   const [moreOpen, setMoreOpen] = useState(false)
   const [detailMenuOpen, setDetailMenuOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -291,6 +329,15 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const mounted = useRef(true)
   const controllers = useRef(new Set<AbortController>())
   selectedIdRef.current = selectedId
+  const todos = dataCenter === undefined
+    ? localTodos
+    : querySnapshot.ids.flatMap(id => entities[id] === undefined ? [] : [entities[id]])
+  const result = dataCenter === undefined ? localResult : querySnapshot
+  const detail = dataCenter === undefined
+    ? localDetail
+    : selectedId === undefined ? undefined : details[selectedId]
+  const visibleError = error ?? querySnapshot.error
+  const visibleBusy = busy || querySnapshot.loading
 
   const withController = async <T,>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> => {
     const controller = new AbortController()
@@ -305,7 +352,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const fetchDetail = useCallback(async (id: string): Promise<void> => {
     try {
       const value = await withController(signal => get(id, signal))
-      setDetail(value)
+      setLocalDetail(value)
     } catch (reason) {
       setError(errorText(reason))
     }
@@ -315,17 +362,36 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     if (!silent) setBusy(true)
     setError(undefined)
     try {
+      if (sharedQuery !== undefined && dataCenter !== undefined) {
+        const snapshot = append && offset > 0
+          ? await sharedQuery.loadMore()
+          : await sharedQuery.refresh()
+        if (!append && selectedIdRef.current !== undefined
+          && !snapshot.ids.includes(selectedIdRef.current)) {
+          setSelectedId(undefined)
+          setLocalDetail(undefined)
+        }
+        return {
+          todos: snapshot.ids.flatMap(id => {
+            const todo = dataCenter.getEntity(id)
+            return todo === undefined ? [] : [todo]
+          }),
+          total: snapshot.total,
+          counts: snapshot.counts,
+          hasMore: snapshot.hasMore,
+        }
+      }
       const page = await withController(signal => list({
         statuses: view === 'archived' ? TODO_STATUSES : [view],
         archived: view === 'archived',
         offset,
       }, signal))
-      setTodos(current => append ? [...current, ...page.todos] : page.todos.slice())
-      setResult(page)
+      setLocalTodos(current => append ? [...current, ...page.todos] : page.todos.slice())
+      setLocalResult(page)
       if (!append && selectedIdRef.current !== undefined
         && !page.todos.some(todo => todo.id === selectedIdRef.current)) {
         setSelectedId(undefined)
-        setDetail(undefined)
+        setLocalDetail(undefined)
       }
       canvas.setAttentionCount(page.counts.pending + page.counts.inProgress)
       return page
@@ -335,7 +401,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     } finally {
       if (!silent) setBusy(false)
     }
-  }, [canvas, list, view])
+  }, [canvas, dataCenter, list, sharedQuery, view])
 
   const refresh = useCallback(async (silent = false): Promise<void> => {
     await Promise.all([
@@ -349,10 +415,23 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   }, [fetchPage, tab.visible])
 
   useEffect(() => {
+    if (dataCenter !== undefined) {
+      dataCenter.setPanelVisible(tab.visible)
+      return () => { dataCenter.setPanelVisible(false) }
+    }
     if (!tab.visible) return
     const interval = window.setInterval(() => { void refresh(true) }, ACTIVE_REFRESH_MS)
     return () => { window.clearInterval(interval) }
-  }, [refresh, tab.visible])
+  }, [dataCenter, refresh, tab.visible])
+
+  useEffect(() => {
+    const id = canvasSnapshot.targetTodoId
+    if (id === undefined || canvasSnapshot.navigationRevision === 0) return
+    setDetailMenuOpen(false)
+    setForm(undefined)
+    setSelectedId(id)
+    void fetchDetail(id)
+  }, [canvasSnapshot.navigationRevision, canvasSnapshot.targetTodoId, fetchDetail])
 
   useEffect(() => {
     mounted.current = true
@@ -422,7 +501,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
       if (!mounted.current) return
       setImportPreview(undefined)
       setTransferResult(t('data.imported', { ...result }))
-      await refresh()
+      if (dataCenter === undefined) await refresh()
     })
   }
 
@@ -467,8 +546,10 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     setError(undefined)
     try {
       await withController(operation)
-      await fetchPage(0)
-      if (refreshSelected && selectedId !== undefined) await fetchDetail(selectedId)
+      if (dataCenter === undefined) {
+        await fetchPage(0)
+        if (refreshSelected && selectedId !== undefined) await fetchDetail(selectedId)
+      }
       return true
     } catch (reason) {
       setError(errorText(reason))
@@ -486,8 +567,13 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     void fetchDetail(id)
   }
 
-  const taskAction = (todo: Todo, action: string, operation: (signal: AbortSignal) => Promise<unknown>): void => {
-    if (todo.executionStatus === 'running') {
+  const taskAction = (
+    todo: Todo,
+    action: string,
+    actionId: TodoLifecycleAction,
+    operation: (signal: AbortSignal) => Promise<unknown>,
+  ): void => {
+    if (requiresAgentStop(todo, actionId)) {
       setStopConfirmation({ action, operation })
     } else {
       void mutate(operation)
@@ -558,7 +644,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
 
   const openCreateForm = (): void => {
     setSelectedId(undefined)
-    setDetail(undefined)
+    setLocalDetail(undefined)
     setForm({ ...EMPTY_FORM })
   }
 
@@ -570,9 +656,10 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   const selectedRun = detail?.runs[0]
   const assigneeGroups = groupByAssignee(todos)
   const detailTodo = detail?.todo
-  const actionable = detailTodo !== undefined && (detailTodo.status === 'pending' || detailTodo.status === 'in_progress')
-  const archived = detailTodo !== undefined && detailTodo.archivedAt !== null
-  const running = detailTodo?.executionStatus === 'running'
+  const actionState = detailTodo === undefined ? undefined : todoActionState(detailTodo)
+  const actionable = actionState?.actionable === true
+  const archived = actionState?.archived === true
+  const running = actionState?.running === true
   const detailMenuItems: MenuEntry[] = []
   if (detailTodo !== undefined) {
     if (detailTodo.status === 'pending') detailMenuItems.push({ id: 'manualStart', label: t('action.manualStart'), icon: <CircleDot size={16} /> })
@@ -597,14 +684,14 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     if (busy || detailTodo === undefined) return
     switch (action) {
       case 'manualStart': void mutate(signal => setStatus({ id: detailTodo.id, status: 'in_progress' }, signal)); break
-      case 'pending': taskAction(detailTodo, t('action.pending'), signal => setStatus({ id: detailTodo.id, status: 'pending' }, signal)); break
-      case 'complete': taskAction(detailTodo, t('action.complete'), signal => approve(detailTodo.id, signal)); break
-      case 'stop': taskAction(detailTodo, t('action.takeOver'), signal => stop(detailTodo.id, signal)); break
+      case 'pending': taskAction(detailTodo, t('action.pending'), 'pending', signal => setStatus({ id: detailTodo.id, status: 'pending' }, signal)); break
+      case 'complete': taskAction(detailTodo, t('action.complete'), 'complete', signal => approve(detailTodo.id, signal)); break
+      case 'stop': taskAction(detailTodo, t('action.takeOver'), 'stop', signal => stop(detailTodo.id, signal)); break
       case 'start': void mutate(signal => start(detailTodo.id, signal)); break
       case 'edit': setForm(formOf(detailTodo)); break
       case 'copy': copyTodo(detailTodo); break
-      case 'archive': taskAction(detailTodo, t('action.archive'), signal => archive(detailTodo.id, signal)); break
-      case 'cancel': taskAction(detailTodo, t('action.cancelTask'), signal => setStatus({ id: detailTodo.id, status: 'cancelled' }, signal)); break
+      case 'archive': taskAction(detailTodo, t('action.archive'), 'archive', signal => archive(detailTodo.id, signal)); break
+      case 'cancel': taskAction(detailTodo, t('action.cancelTask'), 'cancel', signal => setStatus({ id: detailTodo.id, status: 'cancelled' }, signal)); break
       case 'delete': setConfirming(detailTodo); break
     }
   }
@@ -615,7 +702,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
     setMoreOpen(false)
     setForm(undefined)
     setSelectedId(undefined)
-    setDetail(undefined)
+    setLocalDetail(undefined)
   }
 
   return (
@@ -628,7 +715,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
         <header className="dsh-personal-todo-canvas-header">
           <div className="dsh-personal-todo-canvas-heading">
             <div className="dsh-personal-todo-heading-row">
-              {((selectedId !== undefined && form === undefined) || (form !== undefined && form.id === undefined)) && <button type="button" className="dsh-personal-todo-back" aria-label={t('action.back')} title={t('action.back')} onClick={() => { setForm(undefined); setSelectedId(undefined); setDetail(undefined) }}><ArrowLeft size={18} aria-hidden="true" /></button>}
+              {((selectedId !== undefined && form === undefined) || (form !== undefined && form.id === undefined)) && <button type="button" className="dsh-personal-todo-back" aria-label={t('action.back')} title={t('action.back')} onClick={() => { setForm(undefined); setSelectedId(undefined); setLocalDetail(undefined) }}><ArrowLeft size={18} aria-hidden="true" /></button>}
               <h2>{form === undefined ? selectedId === undefined ? t('panel.title') : t('detail.title') : form.id === undefined ? t('action.add') : t('action.edit')}</h2>
             </div>
             {(selectedId === undefined || form !== undefined) && <p>{form === undefined ? t('panel.description') : form.id === undefined ? t('form.description') : t('form.editDescription')}</p>}
@@ -710,14 +797,14 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
             />
           </div>
           </>}
-          {error !== undefined && stopConfirmation === undefined && <div className="dsh-personal-todo-error" role="alert">{t('state.error', { message: error })}</div>}
+          {visibleError !== undefined && stopConfirmation === undefined && <div className="dsh-personal-todo-error" role="alert">{t('state.error', { message: visibleError })}</div>}
           {transferBusy && <div className="dsh-personal-todo-transfer" role="status">{t('data.busy')}</div>}
           {transferError !== undefined && importPreview === undefined && <div className="dsh-personal-todo-error" role="alert">{t('data.error', { message: transferError })}</div>}
           {transferResult !== undefined && <div className="dsh-personal-todo-transfer" role="status">{transferResult}</div>}
           <div className="dsh-personal-todo-workspace" data-detail={selectedId !== undefined && form === undefined} data-form={form !== undefined} data-empty={todos.length === 0 && selectedId === undefined && form === undefined} data-has-selection={selectedId !== undefined || form !== undefined}>
           <div className="dsh-personal-todo-list">
-            {busy && todos.length === 0 && <div className="dsh-personal-todo-empty">{t('state.loading')}</div>}
-            {!busy && error === undefined && todos.length === 0 && (
+            {visibleBusy && todos.length === 0 && <div className="dsh-personal-todo-empty">{t('state.loading')}</div>}
+            {!visibleBusy && visibleError === undefined && todos.length === 0 && (
               <div className="dsh-personal-todo-empty-state">
                 <span className="dsh-personal-todo-empty-icon"><EmptyIcon size={28} strokeWidth={1.5} aria-hidden="true" /></span>
                 <h3>{emptyMessage}</h3>
@@ -745,7 +832,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
                         {todo.tags.map(tag => <span className="dsh-personal-todo-badge" key={tag} title={tag}><Tag size={12} aria-hidden="true" /><span className="dsh-personal-todo-tag-text">{tag}</span></span>)}
                       </div>
                       {executionLabel(todo) !== undefined && <span className="dsh-personal-todo-transfer">{executionLabel(todo)}</span>}
-                      {(todo.status === 'pending' || todo.status === 'in_progress') && <Button size="sm" variant="outline" icon={<CircleCheck size={14} aria-hidden="true" />} disabled={busy} onClick={() => { taskAction(todo, t('action.complete'), signal => approve(todo.id, signal)) }}>{t('action.complete')}</Button>}
+                      {(todo.status === 'pending' || todo.status === 'in_progress') && <Button size="sm" variant="outline" icon={<CircleCheck size={14} aria-hidden="true" />} disabled={busy} onClick={() => { taskAction(todo, t('action.complete'), 'complete', signal => approve(todo.id, signal)) }}>{t('action.complete')}</Button>}
                     </div>
                   </article>
                 ))}
@@ -773,14 +860,14 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
                 <div className="dsh-personal-todo-detail-summary"><div className="dsh-personal-todo-title-row"><h2>{detail.todo.title}</h2><span className="dsh-personal-todo-badge" data-status={detail.todo.status}><DetailStatusIcon size={14} aria-hidden="true" />{statusLabel(detail.todo.status)}</span></div><div className="dsh-personal-todo-meta"><span className="dsh-personal-todo-owner"><UserRound size={14} aria-hidden="true" />{t('meta.assignee', { assignee: detail.todo.assignee ?? t('assignee.unassigned') })}</span>{detail.todo.reviewRound > 0 && <span>{t('meta.reviewRound', { round: detail.todo.reviewRound })}</span>}</div></div>
                 <div className="dsh-personal-todo-deadline"><CalendarDays size={14} aria-hidden="true" /><span>{t('field.dueAt')}</span>{detail.todo.dueAt === null ? <span>{t('meta.noDueDate')}</span> : <time dateTime={detail.todo.dueAt}>{new Date(detail.todo.dueAt).toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</time>}</div>
                 <div className="dsh-personal-todo-detail-actions">
-                  {!archived && actionable && !running && <Button size="sm" variant="primary" icon={<CircleCheck size={16} aria-hidden="true" />} disabled={busy} onClick={() => { taskAction(detail.todo, t('action.complete'), signal => approve(detail.todo.id, signal)) }}>{t('action.complete')}</Button>}
+                  {!archived && actionable && !running && <Button size="sm" variant="primary" icon={<CircleCheck size={16} aria-hidden="true" />} disabled={busy} onClick={() => { taskAction(detail.todo, t('action.complete'), 'complete', signal => approve(detail.todo.id, signal)) }}>{t('action.complete')}</Button>}
                   {!archived && actionable && !running && detail.todo.primarySessionId === null && <Button size="sm" variant="outline" icon={<Play size={14} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => start(detail.todo.id, signal)) }}>{t('action.start')}</Button>}
                   {detail.todo.primarySessionId !== null && <Button size="sm" variant={running && !archived ? 'primary' : 'outline'} icon={<MessageSquare size={16} aria-hidden="true" />} disabled={busy} onClick={() => { openConversation(detail.todo.primarySessionId as string, null) }}>{t('action.openConversation')}</Button>}
-                  {!archived && running && <Button size="sm" variant="outline" disabled={busy} onClick={() => { taskAction(detail.todo, t('action.takeOver'), signal => stop(detail.todo.id, signal)) }}>{t('action.takeOver')}</Button>}
+                  {!archived && running && <Button size="sm" variant="outline" disabled={busy} onClick={() => { taskAction(detail.todo, t('action.takeOver'), 'stop', signal => stop(detail.todo.id, signal)) }}>{t('action.takeOver')}</Button>}
                   {!archived && !actionable && <Button size="sm" variant="primary" icon={<Undo2 size={14} aria-hidden="true" />} disabled={busy} onClick={() => { void mutate(signal => setStatus({ id: detail.todo.id, status: 'pending' }, signal)) }}>{t('action.reopen')}</Button>}
                   {archived && <Button size="sm" variant="primary" icon={<Undo2 size={14} aria-hidden="true" />} disabled={busy} onClick={() => {
                     void mutate(signal => restore(detail.todo.id, signal), false).then((saved) => {
-                      if (saved) { setSelectedId(undefined); setDetail(undefined) }
+                      if (saved) { setSelectedId(undefined); setLocalDetail(undefined) }
                     })
                   }}>{t('action.restore')}</Button>}
                   <Menu open={detailMenuOpen} onClose={() => { setDetailMenuOpen(false) }}
@@ -862,7 +949,7 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
           if (confirming === undefined) return
           const id = confirming.id
           void mutate(signal => deleteTodo(id, signal), false).then((deleted) => {
-            if (deleted) { setConfirming(undefined); setSelectedId(undefined); setDetail(undefined) }
+            if (deleted) { setConfirming(undefined); setSelectedId(undefined); setLocalDetail(undefined) }
           })
         }}>{t('action.delete')}</Button></>}
       />

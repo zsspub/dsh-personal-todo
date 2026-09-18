@@ -18,6 +18,9 @@ export default defineConfig({
   clean: false,
   minify: true,
   sourcemap: true,
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  },
   deps: {
     onlyBundle: false,
     neverBundle: specifier => EXTERNALS.has(specifier),

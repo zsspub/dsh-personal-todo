@@ -13,6 +13,8 @@ English | [中文](README.zh.md)
 
 ## Features
 
+- “看看我的待办”之类的纯展示请求使用 `personal_todo_show`；工具执行区只保留宿主的紧凑记录，完整的可交互待办卡片在回答结束后的 turn 尾部展示，而不是 Markdown 表格。卡片支持完整单项操作、固定高度内滚动全部结果，以及打开右侧面板并定位任务。
+- 对话中的多张历史卡片、右侧面板、侧栏数量和 `@` 引用通过 Nanostores 与 React `useSyncExternalStore` 共享同一份客户端数据；任一位置修改后其他位置立即同步。卡片在挂载、窗口聚焦、手动刷新和操作成功后刷新，失败时保留已有数据。
 - 支持面板与 Agent 工具的完整 JSON 导入导出：导出版本 2，兼容导入版本 1/2。重复 ID 跳过，仅新增且含旧版运行记录的任务转为待办。新实时运行状态不写入备份，任何导入都不会启动 Agent。见[数据导入导出](README.zh.md#数据导入导出)。
 - 聊天输入框的 `@` 引用仅展示待办和进行中分类，支持按 Tab 进入、关键词搜索和发送时读取最新详情。需要 DSH `ui-input-trigger >=0.1.2-rc.1`。
 - Durable SQLite storage with schema versioning, WAL, foreign keys, a busy timeout, and owner-only filesystem permissions.
@@ -30,6 +32,7 @@ English | [中文](README.zh.md)
 ## Requirements
 
 - 支持右侧 Sidebar Tab、`sessionQuery` 和 Agent 生命周期通知的 DeepSeek Harness Web profile；按 `0.1.5-rc.2` 接口实现。
+- `@deepseek-ai/dsh-client-ui-tool >=0.1.5-rc.2 <0.2.0` and `@deepseek-ai/cordis ^4.0.2`.
 - Node.js `^22.19.0 || >=24.0.0`.
 - pnpm 11 for development.
 
@@ -54,13 +57,14 @@ The bundle patch mounts the Host service and tools. Its Web manifest loads the c
 | Tool | Purpose |
 | --- | --- |
 | `personal_todo_add` | 创建待办，只保存不执行；支持备注、负责人、优先级、截止时间和标签，默认中优先级。 |
-| `personal_todo_list` | Filter and page todos; returns matching rows, total, global status counts, and `hasMore`. |
+| `personal_todo_show` | 纯展示请求使用；在回答结束后的 turn 尾部展示实时卡片，模型只补充一句摘要，不逐项复述或生成 Markdown 表格。 |
+| `personal_todo_list` | Agent 后续编辑、删除或数据处理时使用，返回完整 JSON；旧日志也会渲染同款卡片。 |
 | `personal_todo_update` | Replace any supplied mutable fields; `null` clears notes, assignee, or due time and `[]` clears tags. |
 | `personal_todo_delete` | Permanently delete one todo by UUID. |
 | `personal_todo_export` | 返回 `{ filename, json }` 完整备份，由宿主文件工具保存。 |
 | `personal_todo_import` | 接收 `{ json }`，增量导入并返回新增、跳过及执行重置数量。 |
 
-列表默认返回待办和进行中，排除归档。已移除 `needsAttention` 筛选与计数，以及 `personal_todo_progress`、`personal_todo_block`、`personal_todo_submit_review` 工具。通用编辑不能修改任务进度，Agent 工具不能代替用户确认完成。Remote 保留 `setStatus({ id, status }, signal)`、`stop({ id }, signal)` 和等价于完成的 `approve`；移除 `reply` 和 `requestChanges`。
+列表默认返回待办和进行中，排除归档。对话卡片保存有界历史快照并按原筛选读取当前数据；相同筛选共享全量分页请求，卡片本身不轮询。卡片不提供新建、复制或 JSON 导入导出；删除始终确认，运行中任务的危险状态操作先确认停止。已移除 `needsAttention` 筛选与计数，以及 `personal_todo_progress`、`personal_todo_block`、`personal_todo_submit_review` 工具。通用编辑不能修改任务进度，Agent 工具不能代替用户确认完成。Remote 保留 `setStatus({ id, status }, signal)`、`stop({ id }, signal)` 和等价于完成的 `approve`；移除 `reply` 和 `requestChanges`。
 
 ## Task flow
 

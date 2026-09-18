@@ -306,6 +306,7 @@ describe('Host Remote service and Agent tools', () => {
     expect(inject).not.toHaveBeenCalled()
     expect([...tools.keys()]).toEqual([
       'personal_todo_add',
+      'personal_todo_show',
       'personal_todo_list',
       'personal_todo_update',
       'personal_todo_delete',
@@ -326,6 +327,7 @@ describe('Host Remote service and Agent tools', () => {
       type: 'object',
       properties: { archived: { type: 'boolean' } },
     })
+    expect(tools.get('personal_todo_show')?.parameters).toEqual(tools.get('personal_todo_list')?.parameters)
   })
 
   it.each([undefined, 'none', 'low', 'medium', 'high'] as const)('Agent 创建待办时优先级 %s 的保存和查询结果', async priority => {
@@ -340,6 +342,31 @@ describe('Host Remote service and Agent tools', () => {
     })
     await tools.get('personal_todo_update')?.execute({ id: added.id, title: '更新标题' }, run())
     expect((await ctx.personalTodo.get({ id: added.id }, signal)).todo.priority).toBe(priority ?? 'medium')
+  })
+
+  it('展示工具只向模型返回数量摘要，并持久化有界卡片快照', async () => {
+    const { ctx, tools } = await setup()
+    const added = await ctx.personalTodo.create({ title: '卡片展示', tags: ['dsh'] }, signal)
+    const tool = tools.get('personal_todo_show')!
+    const args = { statuses: ['pending'] as const, tags: ['dsh'], limit: 10, offset: 0 }
+    const result = await tool.execute(args, run()) as Awaited<ReturnType<typeof ctx.personalTodo.list>>
+    const rendered = tool.output.render(args, result)[0]?.text
+    const meta = tool.output.presentationMeta?.(args, result)
+
+    expect(result.todos).toMatchObject([{ id: added.id }])
+    expect(rendered).toBe('已在对话卡片中展示 1 项待办。请只补充一句简短摘要，不要逐项复述，也不要生成 Markdown 表格。')
+    expect(rendered).not.toContain(added.id)
+    expect(meta).toMatchObject({
+      kind: 'personal-todo-list',
+      version: 1,
+      query: { statuses: ['pending'], tags: ['dsh'] },
+      snapshot: { total: 1, todos: [{ id: added.id }] },
+      snapshotTruncated: false,
+    })
+    expect((meta as { query: Record<string, unknown> }).query).not.toHaveProperty('limit')
+    expect((meta as { query: Record<string, unknown> }).query).not.toHaveProperty('offset')
+    expect(tools.get('personal_todo_list')?.output.render(args, result)[0]?.text).toContain(added.id)
+    expect(tools.get('personal_todo_list')?.output.presentationMeta?.(args, result)).toEqual(meta)
   })
 
   it.each(['pending', 'in_progress'] as const)('现有 approve API 从 %s 完成待办，工具可查询最终状态', async (status) => {

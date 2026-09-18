@@ -1,14 +1,17 @@
-/** 侧栏入口与待办面板共用的打开状态和待处理提醒数量。 */
+/** 侧栏入口、待办面板与对话卡片共用的导航状态。 */
 export interface PersonalTodoCanvasSnapshot {
     readonly open: boolean;
     readonly attentionCount: number;
+    readonly targetTodoId: string | undefined;
+    readonly navigationRevision: number;
 }
-/** 供两个独立插槽入口共用的轻量可订阅状态控制器。 */
+/** 供多个独立插槽入口共用的 Nanostores 状态控制器。 */
 export declare class PersonalTodoCanvasController {
     #private;
     readonly getSnapshot: () => PersonalTodoCanvasSnapshot;
     readonly subscribe: (listener: () => void) => (() => void);
     setAttentionCount(attentionCount: number): void;
     open(): void;
+    focusTodo(targetTodoId: string): void;
     close(): void;
 }

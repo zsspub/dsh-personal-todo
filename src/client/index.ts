@@ -8,14 +8,20 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import personalTodoRemote from 'dsh-personal-todo/remote'
 import {
   PersonalTodoCanvas, PersonalTodoTrigger, type PersonalTodoPanelInjected,
 } from './PersonalTodoPanel.tsx'
+import { TodoToolCard, type TodoToolCardProps } from './TodoToolCard.tsx'
+import { TodoTurnTail, type TodoTurnTailInjected } from './TodoTurnTail.tsx'
+import { PersonalTodoDataCenter, type PersonalTodoRemoteApi } from './data-center.ts'
 import { createTodoInputSource } from './input-source.ts'
 import { installTodoInputIcon } from './input-source-icon.ts'
-import { PersonalTodoCanvasController } from './canvas.ts'
 import { en, NS, zh, type PersonalTodoKey } from './locales.ts'
+import { personalTodoTurnDefinition, selectPersonalTodoTail } from './turn-todos.ts'
 
 export { PersonalTodoCanvas, PersonalTodoTrigger } from './PersonalTodoPanel.tsx'
 export type {
@@ -33,7 +39,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-export const inject = ['slots', 'locale', 'remote', 'sessions', 'sidebarRight', 'sidebarRightTabs']
+export const inject = [
+  'slots', 'locale', 'remote', 'sessions', 'sidebarRight', 'sidebarRightTabs', 'uiConversation',
+]
 
 function remoteFailure(result: { readonly error: { readonly message: string; readonly code: string } }): Error {
   return new Error(`${result.error.message} (${result.error.code})`)
@@ -43,19 +51,9 @@ function remoteFailure(result: { readonly error: { readonly message: string; rea
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'personal-todo: dictionaries')
   const disposeRemote = await ctx.remote.$mount(personalTodoRemote)
-  const canvas = new PersonalTodoCanvasController()
   const uiFiber = ctx.inject(['remote.personalTodo'], (scope: ClientContext) => {
     const sessions = (scope as unknown as { readonly sessions: ISessions }).sessions
-    const panel = (): PersonalTodoPanelInjected => ({
-      canvas,
-      openCanvas: () => {
-        try {
-          scope.sidebarRight.openTab(PERSONAL_TODO_TAB_KIND)
-        } catch (error) {
-          if (error instanceof Error && error.message === 'sidebarRight: no session surface is mounted') return
-          throw error
-        }
-      },
+    const remote: PersonalTodoRemoteApi = {
       list: async (request, signal) => {
         const result = await scope.remote.personalTodo.list(request, signal)
         if (!result.ok) throw remoteFailure(result)
@@ -121,41 +119,72 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         if (!result.ok) throw remoteFailure(result)
         return result.value
       },
-      openSession: async (id, parentId) => {
-        const sessionId = id as SessionId
-        if (parentId === null) {
-          sessions.open(sessionId)
-          return true
-        }
-        const retained = sessions.subagentAddress(sessionId)
-        if (retained !== undefined) {
-          sessions.openSubagent(retained)
-          return true
-        }
-        const parentSessionId = parentId as SessionId
-        sessions.open(parentSessionId)
-        await sessions.refreshSubagents(parentSessionId)
-        const child = sessions.list.getSnapshot().subagentsByParent[parentSessionId]?.entries
-          .find(entry => entry.kind === 'child' && entry.id === sessionId)
-        if (child?.kind !== 'child') return false
-        sessions.openSubagent({ parentSessionId, childSessionId: sessionId, mode: child.mode } satisfies SubagentAddress)
+    }
+    const dataCenter = new PersonalTodoDataCenter(remote)
+    scope.effect(() => () => { dataCenter.dispose() }, 'personal-todo: data center')
+    const openSession = async (id: string, parentId: string | null): Promise<boolean> => {
+      const sessionId = id as SessionId
+      if (parentId === null) {
+        sessions.open(sessionId)
         return true
+      }
+      const retained = sessions.subagentAddress(sessionId)
+      if (retained !== undefined) {
+        sessions.openSubagent(retained)
+        return true
+      }
+      const parentSessionId = parentId as SessionId
+      sessions.open(parentSessionId)
+      await sessions.refreshSubagents(parentSessionId)
+      const child = sessions.list.getSnapshot().subagentsByParent[parentSessionId]?.entries
+        .find(entry => entry.kind === 'child' && entry.id === sessionId)
+      if (child?.kind !== 'child') return false
+      sessions.openSubagent({ parentSessionId, childSessionId: sessionId, mode: child.mode } satisfies SubagentAddress)
+      return true
+    }
+    const panel = (): PersonalTodoPanelInjected => ({
+      dataCenter,
+      canvas: dataCenter.canvas,
+      openCanvas: () => {
+        dataCenter.canvas.open()
+        try {
+          scope.sidebarRight.openTab(PERSONAL_TODO_TAB_KIND)
+        } catch (error) {
+          if (error instanceof Error && error.message === 'sidebarRight: no session surface is mounted') return
+          throw error
+        }
       },
+      list: dataCenter.list.bind(dataCenter),
+      exportData: dataCenter.exportData.bind(dataCenter),
+      importData: dataCenter.importData.bind(dataCenter),
+      get: dataCenter.get.bind(dataCenter),
+      create: dataCenter.create.bind(dataCenter),
+      update: dataCenter.update.bind(dataCenter),
+      start: dataCenter.start.bind(dataCenter),
+      setStatus: dataCenter.setStatus.bind(dataCenter),
+      stop: dataCenter.stop.bind(dataCenter),
+      approve: dataCenter.approve.bind(dataCenter),
+      archive: dataCenter.archive.bind(dataCenter),
+      restore: dataCenter.restore.bind(dataCenter),
+      delete: dataCenter.delete.bind(dataCenter),
+      openSession,
     })
+    const openPanel = (): void => {
+      try {
+        scope.sidebarRight.openTab(PERSONAL_TODO_TAB_KIND)
+      } catch (error) {
+        if (error instanceof Error && error.message === 'sidebarRight: no session surface is mounted') return
+        throw error
+      }
+    }
+    dataCenter.setOpenPanel(openPanel)
+    scope.uiConversation.events.register(personalTodoTurnDefinition)
     scope.inject(['inputTriggers'], inputScope => {
       const t = inputScope.locale.bind(NS)
       inputScope.effect(installTodoInputIcon, 'personal-todo: reference icons')
       inputScope.effect(() => inputScope.inputTriggers.registerSource(createTodoInputSource({
-        list: async (request, signal) => {
-          const result = await inputScope.remote.personalTodo.list(request, signal)
-          if (!result.ok) throw remoteFailure(result)
-          return result.value
-        },
-        get: async (id, signal) => {
-          const result = await inputScope.remote.personalTodo.get({ id }, signal)
-          if (!result.ok) throw remoteFailure(result)
-          return result.value
-        },
+        list: dataCenter.list.bind(dataCenter),
+        get: dataCenter.get.bind(dataCenter),
       }, t)), 'personal-todo: input references')
     })
     const t = scope.locale.bind(NS)
@@ -177,6 +206,28 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       locale: NS,
       inject: panel,
     }, PersonalTodoCanvas))
+    scope.slots.inject('conversation.chat.turnTail', () => scope.slots.register({
+      name: 'conversation.chat.turnTail',
+      priority: -20,
+      select: selectPersonalTodoTail,
+      locale: NS,
+      inject: (): TodoTurnTailInjected => ({
+        dataCenter,
+        openSession,
+      }),
+    }, TodoTurnTail))
+    scope.slots.inject('tool.call.toolview', () => {
+      const inject = (): Pick<TodoToolCardProps, 'dataCenter' | 'openSession'> => ({
+        dataCenter,
+        openSession,
+      })
+      return scope.slots.register({
+        name: 'tool.call.toolview',
+        key: 'personal_todo_list',
+        locale: NS,
+        inject,
+      }, TodoToolCard)
+    })
   })
   try {
     await uiFiber
