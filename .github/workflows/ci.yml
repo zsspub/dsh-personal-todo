@@ -13,6 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: 确认没有提交已忽略文件
+        run: |
+          tracked_ignored=$(git ls-files -ci --exclude-standard)
+          if [ -n "$tracked_ignored" ]; then
+            printf '%s\n' "$tracked_ignored"
+            echo "以上文件已被 .gitignore 忽略，不应继续纳入版本控制。"
+            exit 1
+          fi
       - uses: pnpm/action-setup@v4
         with:
           version: 11.7.0
