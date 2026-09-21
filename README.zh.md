@@ -33,7 +33,7 @@ read_when:
 - 支持右侧 Sidebar Tab API、`sessionQuery` 和 Agent 生命周期通知的 DeepSeek Harness Web profile；本次按 `0.1.5-rc.2` 接口实现。
 - Web profile 需要 `@deepseek-ai/dsh-client-ui-tool >=0.1.5-rc.2 <0.2.0`；项目使用 `@deepseek-ai/cordis ^4.0.2`。
 - Node.js `^22.19.0 || >=24.0.0`。
-- 开发环境使用 pnpm 11。
+- 开发环境使用 pnpm `11.7.0`。
 
 ## 安装
 
