@@ -246,6 +246,21 @@ afterEach(() => {
 })
 
 describe('TodoToolCard', () => {
+  it('按当前语言格式化筛选条件中的列表分隔符', () => {
+    const api = service([])
+    const center = new PersonalTodoDataCenter(api)
+    render(<Card center={center} block={resultBlock({
+      statuses: ['pending', 'in_progress'],
+      priorities: ['low', 'high'],
+      tags: ['work', 'urgent'],
+    }, [])} />)
+
+    expect(screen.getByText(
+      'In progress, Pending · Priority: High priority, Low priority · Tags: urgent, work',
+    )).toBeTruthy()
+    center.dispose()
+  })
+
   it('在 turn 结束位置复用实时卡片展示持久化快照', async () => {
     const row = todo({ title: '回合末尾待办' })
     const api = service([row])
@@ -313,7 +328,7 @@ describe('TodoToolCard', () => {
     const center = new PersonalTodoDataCenter(api)
     render(<Card center={center} block={snapshotOnlyBlock([row])} />)
 
-    await user.click(screen.getByRole('button', { name: '更多待办操作' }))
+    await user.click(screen.getByRole('button', { name: 'More todo actions' }))
     await user.click(screen.getByRole('menuitem', { name: 'Delete' }))
     await user.click(within(screen.getByRole('dialog', { name: 'Delete todo' }))
       .getByRole('button', { name: 'Delete' }))
@@ -351,7 +366,7 @@ describe('TodoToolCard', () => {
 
     const cards = screen.getAllByRole('region', { name: 'Personal Todos' })
     const firstCard = cards[0]!
-    await user.click(within(firstCard).getByRole('button', { name: '更多待办操作' }))
+    await user.click(within(firstCard).getByRole('button', { name: 'More todo actions' }))
     await user.click(screen.getByRole('menuitem', { name: 'Edit' }))
     const dialog = screen.getByRole('dialog', { name: 'Edit' })
     const title = within(dialog).getByLabelText('Title')
@@ -376,14 +391,14 @@ describe('TodoToolCard', () => {
     await screen.findByText('同步卡片')
 
     await user.click(screen.getByRole('button', { name: 'Mark complete' }))
-    const stopDialog = screen.getByRole('dialog', { name: '停止 Agent 并继续操作？' })
+    const stopDialog = screen.getByRole('dialog', { name: 'Stop the Agent and continue?' })
     expect(api.approve).not.toHaveBeenCalled()
-    await user.click(within(stopDialog).getByRole('button', { name: '停止并继续' }))
+    await user.click(within(stopDialog).getByRole('button', { name: 'Stop and continue' }))
     expect(await screen.findByText('停止失败')).toBeTruthy()
     expect(center.getEntity(row.id)?.status).toBe('pending')
-    await user.click(within(stopDialog).getByRole('button', { name: '关闭停止确认' }))
+    await user.click(within(stopDialog).getByRole('button', { name: 'Close stop confirmation' }))
 
-    await user.click(screen.getByRole('button', { name: '更多待办操作' }))
+    await user.click(screen.getByRole('button', { name: 'More todo actions' }))
     await user.click(screen.getByRole('menuitem', { name: 'Delete' }))
     const deleteDialog = screen.getByRole('dialog', { name: 'Delete todo' })
     expect(api.delete).not.toHaveBeenCalled()
