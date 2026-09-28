@@ -138,7 +138,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         return true
       }
       const parentSessionId = parentId as SessionId
-      await sessions.refreshSubagents(parentSessionId)
+      await sessions.refreshProjections(parentSessionId)
       const child = sessions.subagentAddress(sessionId)
       if (child === undefined) return false
       scope.uiWorkspace.openSession(child)

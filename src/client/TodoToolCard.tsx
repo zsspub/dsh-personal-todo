@@ -115,7 +115,7 @@ function textContent(content: readonly unknown[]): string | undefined {
 }
 
 function modelOf(block: ToolCallViewProps['block']): CardModel {
-  if (!('kind' in block)) return { query: parseQuery(block.argsRaw), snapshot: undefined }
+  if (!('kind' in block)) return { query: block.phase === 'start' ? parseQuery(block.argsRaw) : undefined, snapshot: undefined }
   if (isPersonalTodoPresentationMeta(block.meta)) {
     return { query: block.meta.query, snapshot: block.meta.snapshot }
   }

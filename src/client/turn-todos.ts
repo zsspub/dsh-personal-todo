@@ -46,7 +46,7 @@ export const personalTodoTurnDefinition: ConversationNodeDefinition<PersonalTodo
       if (event.data.name !== 'personal_todo_show') return state
       return { ...state, calls: new Set([...state.calls, String(event.data.callId)]) }
     }
-    if (event.type !== 'tool/result' || event.data.message.content[0].isError === true) return state
+    if (event.type !== 'tool/result' || event.data.message.isError === true) return state
     const callId = String(event.data.message.source.callId)
     if (!state.calls.has(callId) || state.results.some(result => result.callId === callId)) return state
     if (!isPersonalTodoPresentationMeta(event.data.meta)) return state

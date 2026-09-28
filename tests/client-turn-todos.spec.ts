@@ -71,7 +71,7 @@ describe('个人待办回合投影', () => {
       data: {
         turn: 3,
         step: 1,
-        message: { source: { callId: 'list' }, content: [{ isError: false }] },
+        message: { source: { callId: 'list' }, isError: false, content: [] },
         meta: meta('ignored'),
       },
     })
@@ -82,7 +82,7 @@ describe('个人待办回合投影', () => {
       data: {
         turn: 3,
         step: 1,
-        message: { source: { callId: 'show-1' }, content: [{ isError: false }] },
+        message: { source: { callId: 'show-1' }, isError: false, content: [] },
         meta: meta('first'),
       },
     })
@@ -99,7 +99,7 @@ describe('个人待办回合投影', () => {
       data: {
         turn: 3,
         step: 2,
-        message: { source: { callId: 'show-2' }, content: [{ isError: false }] },
+        message: { source: { callId: 'show-2' }, isError: false, content: [] },
         meta: meta('second'),
       },
     })
@@ -146,7 +146,7 @@ describe('个人待办回合投影', () => {
         data: {
           turn: 3,
           step: 1,
-          message: { source: { callId: 'show' }, content: [{ isError: true }] },
+          message: { source: { callId: 'show' }, isError: true, content: [] },
           meta: meta('failed'),
         },
       },
@@ -157,7 +157,7 @@ describe('个人待办回合投影', () => {
         data: {
           turn: 3,
           step: 1,
-          message: { source: { callId: 'show' }, content: [{ isError: false }] },
+          message: { source: { callId: 'show' }, isError: false, content: [] },
         },
       },
     ]) state = update(state, result)
