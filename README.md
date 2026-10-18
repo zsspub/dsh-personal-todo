@@ -52,6 +52,12 @@ pnpm dsh plugin --profile web add /absolute/path/to/dsh-personal-todo
 
 The bundle patch mounts the Host service and tools. Its Web manifest loads the client automatically.
 
+## 首页打开待办
+
+点击“待办”优先使用当前会话；没有当前会话时，按宿主最近工作区规则创建一个普通空会话，待原生右栏挂载后打开待办标签。没有可用工作区时提示先选择工作区。这个插件方案会增加一个空会话，不提供真正的全局右侧宿主能力，不发送消息或派发待办，不修改 DSH 宿主。连续点击共享创建请求，失败可重试；切换导航或卸载插件会取消后续打开动作。
+
+每个会话的面板保持独立，已访问标签隐藏或切换会话时保留导航和未提交表单；显式关闭标签结束实例。不会移动文件和终端的会话上下文，卸载时不会删除已创建会话。工作区选择、10 秒挂载等待、生命周期及真实 GUI 验收边界详见 [中文说明](README.zh.md#首页打开待办)。
+
 ## Agent tools
 
 | Tool | Purpose |

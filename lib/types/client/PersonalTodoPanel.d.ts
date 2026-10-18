@@ -4,9 +4,11 @@ import type { CreateTodoInput, DeleteTodoResult, ListTodoInput, Todo, TodoDetail
 import type { ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, SetTodoStatusRequest } from '../types.ts';
 import type { PersonalTodoDataCenter } from './data-center.ts';
 import type { PersonalTodoCanvasController } from './canvas.ts';
+import type { PersonalTodoPanelOpener } from './panel-opener.ts';
 import type { NS } from './locales.ts';
 export interface PersonalTodoPanelInjected {
     readonly dataCenter?: PersonalTodoDataCenter;
+    readonly panelOpener?: PersonalTodoPanelOpener;
     readonly canvas: PersonalTodoCanvasController;
     readonly openCanvas: () => void;
     readonly list: (request: ListTodoInput, signal: AbortSignal) => Promise<TodoListResult>;
@@ -27,6 +29,6 @@ export interface PersonalTodoPanelInjected {
 export type PersonalTodoTriggerProps = PropsRuntime<'sidebar.footer.action'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected;
 export type PersonalTodoCanvasProps = PropsRuntime<'sidebar.right.pane.tab'> & PropsLocale<typeof NS> & PersonalTodoPanelInjected;
 /** 打开待办面板并提示待处理事项的侧栏入口。 */
-export declare function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCanvas }: PersonalTodoTriggerProps): React.JSX.Element;
+export declare function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, panelOpener, openCanvas }: PersonalTodoTriggerProps): React.JSX.Element;
 /** 渲染在宿主右侧 Sidebar Tab 中的个人待办面板。 */
 export declare function PersonalTodoCanvas(props: PersonalTodoCanvasProps): React.JSX.Element;

@@ -75,9 +75,9 @@ export declare class PersonalTodoDataCenter {
     readonly mutations: import("nanostores").PreinitializedMapStore<Record<string, TodoMutationState>> & object;
     readonly canvas: PersonalTodoCanvasController;
     constructor(remote: PersonalTodoRemoteApi, options?: DataCenterOptions);
-    setOpenPanel(openPanel: () => void): void;
+    setOpenPanel(openPanel: (id?: string) => void): void;
     openTodo(id?: string): void;
-    setPanelVisible(visible: boolean): void;
+    setPanelVisible(visible: boolean, owner?: object): void;
     query(input: ListTodoInput, mode: TodoQueryMode, seed?: TodoQuerySeed): TodoQueryHandle;
     getEntity(id: string): Todo | undefined;
     seedTodos(todos: readonly Todo[]): void;
