@@ -37,6 +37,11 @@ export declare const zh: {
     'trigger.label': string;
     'trigger.aria': string;
     'trigger.attention': string;
+    'trigger.opening': string;
+    'trigger.openFailed': string;
+    'trigger.retry': string;
+    'trigger.workspaceRequired': string;
+    'trigger.openTimeout': string;
     'card.title': string;
     'card.total': string;
     'card.filterDefault': string;
@@ -199,6 +204,11 @@ export declare const en: {
     'trigger.label': string;
     'trigger.aria': string;
     'trigger.attention': string;
+    'trigger.opening': string;
+    'trigger.openFailed': string;
+    'trigger.retry': string;
+    'trigger.workspaceRequired': string;
+    'trigger.openTimeout': string;
     'card.title': string;
     'card.total': string;
     'card.filterDefault': string;

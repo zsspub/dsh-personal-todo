@@ -3,6 +3,7 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -21,6 +22,7 @@ import {
 import { TodoToolCard, type TodoToolCardProps } from './TodoToolCard.tsx'
 import { TodoTurnTail, type TodoTurnTailInjected } from './TodoTurnTail.tsx'
 import { PersonalTodoDataCenter, type PersonalTodoRemoteApi } from './data-center.ts'
+import { PersonalTodoPanelOpener } from './panel-opener.ts'
 import { createTodoInputSource } from './input-source.ts'
 import { installTodoInputIcon } from './input-source-icon.ts'
 import { en, NS, zh, type PersonalTodoKey } from './locales.ts'
@@ -43,7 +45,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 export const inject = [
-  'slots', 'locale', 'remote', 'sessions', 'uiWorkspace',
+  'slots', 'locale', 'remote', 'sessions', 'workspaces', 'uiWorkspace', 'uiSession', 'layout',
   'sidebarRight', 'sidebarRightTabs', 'uiConversation',
 ]
 
@@ -126,6 +128,25 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     }
     const dataCenter = new PersonalTodoDataCenter(remote)
     scope.effect(() => () => { dataCenter.dispose() }, 'personal-todo: data center')
+    const t = scope.locale.bind(NS)
+    const current = scope.uiSession.adapter.current
+    const panelOpener = new PersonalTodoPanelOpener({
+      sessions,
+      workspaces: scope.workspaces,
+      current: {
+        getSnapshot: () => current.getSnapshot().key as SessionId | undefined,
+        subscribe: listener => current.subscribe(listener),
+      },
+      mounted: scope.sidebarRight.mounted,
+      beginNavigation: () => scope.layout.beginNavigation(),
+      reveal: id => { scope.uiWorkspace.openSession(id) },
+      openTab: () => { scope.sidebarRight.openTab(PERSONAL_TODO_TAB_KIND) },
+      opened: (sessionId, todoId) => {
+        if (todoId === undefined) dataCenter.canvas.open()
+        else dataCenter.canvas.focusTodo(todoId, sessionId, scope.sidebarRight.active()?.id)
+      },
+      message: reason => t(reason === 'workspaceRequired' ? 'trigger.workspaceRequired' : 'trigger.openTimeout'),
+    })
     const openSession = async (id: string, parentId: string | null): Promise<boolean> => {
       const sessionId = id as SessionId
       if (parentId === null) {
@@ -147,15 +168,8 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const panel = (): PersonalTodoPanelInjected => ({
       dataCenter,
       canvas: dataCenter.canvas,
-      openCanvas: () => {
-        dataCenter.canvas.open()
-        try {
-          scope.sidebarRight.openTab(PERSONAL_TODO_TAB_KIND)
-        } catch (error) {
-          if (error instanceof Error && error.message === 'sidebarRight: no session surface is mounted') return
-          throw error
-        }
-      },
+      panelOpener,
+      openCanvas: () => { void panelOpener.open() },
       list: dataCenter.list.bind(dataCenter),
       exportData: dataCenter.exportData.bind(dataCenter),
       importData: dataCenter.importData.bind(dataCenter),
@@ -171,15 +185,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       delete: dataCenter.delete.bind(dataCenter),
       openSession,
     })
-    const openPanel = (): void => {
-      try {
-        scope.sidebarRight.openTab(PERSONAL_TODO_TAB_KIND)
-      } catch (error) {
-        if (error instanceof Error && error.message === 'sidebarRight: no session surface is mounted') return
-        throw error
-      }
-    }
-    dataCenter.setOpenPanel(openPanel)
+    dataCenter.setOpenPanel(id => { void panelOpener.open(id) })
     scope.uiConversation.events.register(personalTodoTurnDefinition)
     scope.inject(['inputTriggers'], inputScope => {
       const t = inputScope.locale.bind(NS)
@@ -189,10 +195,10 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         get: dataCenter.get.bind(dataCenter),
       }, t)), 'personal-todo: input references')
     })
-    const t = scope.locale.bind(NS)
     scope.effect(() => scope.sidebarRightTabs.register({
       id: PERSONAL_TODO_TAB_ID,
       kind: PERSONAL_TODO_TAB_KIND,
+      keepMounted: true,
       title: () => t('panel.title'),
     }), 'personal-todo: right sidebar tab type')
     scope.slots.inject('sidebar.footer.action', () => scope.slots.register({
@@ -230,6 +236,13 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         inject,
       }, TodoToolCard)
     })
+    // 最后登记，确保标签类型和插槽撤销前先关闭已挂载的待办实例。
+    scope.effect(() => () => {
+      panelOpener.dispose()
+      for (const tab of scope.sidebarRight.openTabs.getSnapshot()) {
+        if (tab.kind === PERSONAL_TODO_TAB_KIND) scope.sidebarRight.closeIn(tab.sessionId, tab.tabId)
+      }
+    }, 'personal-todo: panel opening and tabs')
   })
   try {
     await uiFiber

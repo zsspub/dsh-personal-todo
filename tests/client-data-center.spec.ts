@@ -321,6 +321,36 @@ describe('PersonalTodoDataCenter', () => {
     expect(target.intervals.size).toBe(0)
   })
 
+  it('后台保留面板的隐藏和释放不会停止前台实例刷新', () => {
+    const target = new FocusTarget()
+    const center = new PersonalTodoDataCenter(remote(), { focusTarget: target })
+    const foreground = {}
+    const background = {}
+    center.setPanelVisible(true, foreground)
+    center.setPanelVisible(true, background)
+    expect(target.intervals.size).toBe(1)
+    center.setPanelVisible(false, background)
+    center.setPanelVisible(false, background)
+    expect(target.intervals.size).toBe(1)
+    center.setPanelVisible(false, foreground)
+    expect(target.intervals.size).toBe(0)
+    center.dispose()
+  })
+
+  it('定位委托给打开流程，成功前不广播到后台表单，释放后不再接受请求', () => {
+    const center = new PersonalTodoDataCenter(remote(), { focusTarget: new FocusTarget() })
+    const open = vi.fn()
+    center.setOpenPanel(open)
+    center.openTodo('one')
+    expect(open).toHaveBeenCalledExactlyOnceWith('one')
+    expect(center.canvas.getSnapshot().navigationRevision).toBe(0)
+    center.canvas.focusTodo('one', 'session-one', 'tab-one')
+    expect(center.canvas.getSnapshot()).toMatchObject({ targetTodoId: 'one', targetSessionId: 'session-one', targetTabId: 'tab-one' })
+    center.dispose()
+    center.openTodo('two')
+    expect(open).toHaveBeenCalledOnce()
+  })
+
   it('刷新失败不会反转写操作返回的权威实体', async () => {
     const service = remote([todo('one')])
     const center = new PersonalTodoDataCenter(service, { focusTarget: new FocusTarget() })

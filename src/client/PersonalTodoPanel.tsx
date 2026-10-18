@@ -17,6 +17,7 @@ import { parseTodoBackup, TODO_BACKUP_MAX_BYTES } from '../backup.ts'
 import { Database, Download, Upload } from 'lucide-react'
 import type { PersonalTodoDataCenter, TodoQuerySnapshot } from './data-center.ts'
 import type { PersonalTodoCanvasController } from './canvas.ts'
+import type { PersonalTodoPanelOpener, PanelOpenSnapshot } from './panel-opener.ts'
 import type { NS } from './locales.ts'
 import { requiresAgentStop, todoActionState, type TodoLifecycleAction } from './todo-actions.ts'
 
@@ -26,6 +27,8 @@ const CSS = `
 /* 对齐宿主 ui-settings-general 的入口尺寸、留白和交互颜色。 */
 .dsh-personal-todo-trigger-row{flex:none;display:flex;align-items:center;gap:8px;width:calc(100% + 4px);margin:0 -2px}
 .dsh-personal-todo-trigger-row[data-wide=false]{width:36px;margin:0}
+.dsh-personal-todo-open-error{max-width:240px;padding:8px;color:var(--dsw-alias-state-error-primary);font-size:12px;overflow-wrap:anywhere}
+.dsh-personal-todo-trigger:disabled{cursor:wait;opacity:.6}
 .dsh-personal-todo-trigger{position:relative;flex:1;min-width:0;display:flex;align-items:center;gap:8px;width:auto;height:42px;margin:0;padding:0 10px 0 8px;box-sizing:border-box;border:0;border-radius:12px;background:transparent;cursor:pointer;color:var(--dsw-alias-label-primary);font-family:inherit;font-size:14px;font-weight:400;line-height:22px;text-align:left}
 .dsh-personal-todo-trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-personal-todo-trigger:focus-visible{outline:2px solid var(--dsw-alias-brand-primary-new-colorprimary-new-color);outline-offset:2px}
@@ -98,6 +101,7 @@ const CSS = `
 
 export interface PersonalTodoPanelInjected {
   readonly dataCenter?: PersonalTodoDataCenter
+  readonly panelOpener?: PersonalTodoPanelOpener
   readonly canvas: PersonalTodoCanvasController
   readonly openCanvas: () => void
   readonly list: (request: ListTodoInput, signal: AbortSignal) => Promise<TodoListResult>
@@ -142,6 +146,7 @@ interface AssigneeGroup {
 
 const EMPTY_FORM: FormState = { title: '', notes: '', assignee: '', priority: 'none', dueLocal: '', tags: '' }
 const ACTIVE_REFRESH_MS = 2_000
+const EMPTY_OPEN: PanelOpenSnapshot = { opening: false, error: undefined }
 const EMPTY_ENTITIES: Readonly<Record<string, Todo>> = {}
 const EMPTY_DETAILS: Readonly<Record<string, TodoDetail>> = {}
 const EMPTY_QUERY: TodoQuerySnapshot = {
@@ -219,8 +224,9 @@ function normalizedAssignee(value: string): string | null {
 }
 
 /** 打开待办面板并提示待处理事项的侧栏入口。 */
-export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCanvas }: PersonalTodoTriggerProps) {
+export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, panelOpener, openCanvas }: PersonalTodoTriggerProps) {
   const snapshot = useSyncExternalStore(canvas.subscribe, canvas.getSnapshot)
+  const opening = useSyncExternalStore(panelOpener?.subscribe ?? (() => () => undefined), panelOpener?.getSnapshot ?? (() => EMPTY_OPEN))
   const countQuery = useMemo(() => dataCenter?.query({ limit: 1 }, 'paged'), [dataCenter])
 
   useEffect(() => {
@@ -246,7 +252,7 @@ export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCan
     }
   }, [canvas, countQuery, list])
 
-  const triggerLabel = snapshot.attentionCount === 0
+  const triggerLabel = opening.opening ? t('trigger.opening') : snapshot.attentionCount === 0
     ? t('trigger.aria')
     : t('trigger.attention', { count: snapshot.attentionCount })
 
@@ -260,6 +266,8 @@ export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCan
           aria-label={triggerLabel}
           title={triggerLabel}
           data-wide={wide}
+          disabled={opening.opening}
+          aria-busy={opening.opening}
           onClick={openCanvas}
         >
           <ListTodo size={wide ? 16 : 18} aria-hidden="true" />
@@ -269,6 +277,10 @@ export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, openCan
           )}
         </button>
       </div>
+      {opening.error !== undefined && <div className="dsh-personal-todo-open-error" role="alert">
+        <p>{t('trigger.openFailed', { message: opening.error })}</p>
+        <button type="button" onClick={() => { void panelOpener?.retry() }}>{t('trigger.retry')}</button>
+      </div>}
     </>
   )
 }
@@ -286,6 +298,8 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   }, [t])
   const markdown = (text: string): React.ReactNode => <div className="dsh-personal-todo-markdown"><MarkdownText text={text} {...markdownProps} /></div>
   const { tab } = useTabInfo()
+  const visibilityOwner = useRef({})
+  const consumedNavigation = useRef(0)
   const [view, setView] = useState<View>('pending')
   const sharedQuery = useMemo(() => dataCenter?.query({
     statuses: view === 'archived' ? TODO_STATUSES : [view],
@@ -414,8 +428,9 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
 
   useEffect(() => {
     if (dataCenter !== undefined) {
-      dataCenter.setPanelVisible(tab.visible)
-      return () => { dataCenter.setPanelVisible(false) }
+      const owner = visibilityOwner.current
+      dataCenter.setPanelVisible(tab.visible, owner)
+      return () => { dataCenter.setPanelVisible(false, owner) }
     }
     if (!tab.visible) return
     const interval = window.setInterval(() => { void refresh(true) }, ACTIVE_REFRESH_MS)
@@ -424,12 +439,16 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
 
   useEffect(() => {
     const id = canvasSnapshot.targetTodoId
-    if (id === undefined || canvasSnapshot.navigationRevision === 0) return
+    if (id === undefined || canvasSnapshot.navigationRevision === 0 || !tab.visible
+      || consumedNavigation.current === canvasSnapshot.navigationRevision
+      || (canvasSnapshot.targetSessionId !== undefined && canvasSnapshot.targetSessionId !== props.sessionId)
+      || (canvasSnapshot.targetTabId !== undefined && canvasSnapshot.targetTabId !== tab.id)) return
+    consumedNavigation.current = canvasSnapshot.navigationRevision
     setDetailMenuOpen(false)
     setForm(undefined)
     setSelectedId(id)
     void fetchDetail(id)
-  }, [canvasSnapshot.navigationRevision, canvasSnapshot.targetTodoId, fetchDetail])
+  }, [canvasSnapshot.navigationRevision, canvasSnapshot.targetTodoId, canvasSnapshot.targetSessionId, canvasSnapshot.targetTabId, fetchDetail, props.sessionId, tab.id, tab.visible])
 
   useEffect(() => {
     mounted.current = true
