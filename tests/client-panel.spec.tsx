@@ -713,6 +713,38 @@ describe('PersonalTodoCanvas', () => {
     await waitFor(() => expect(service.list).toHaveBeenCalledOnce())
   })
 
+  it('保留的会话表单不受其他会话或其他分栏的待办定位影响', async () => {
+    const user = userEvent.setup()
+    const service = api()
+    const panel = (visible: boolean) => <PersonalTodoCanvas {...{
+      t,
+      ...service,
+      sessionId: 'session-one' as ComponentProps<typeof PersonalTodoCanvas>['sessionId'],
+      useTabInfo: () => ({
+        sidebar: { expanded: true, fullscreen: false },
+        panel: { id: 'pane-one' },
+        tab: {
+          id: 'tab-one', visible,
+          navigation: { address: 'sidebar://personal-todo', params: undefined, revision: 0 },
+          signal: new AbortController().signal,
+          actions: { bindCommands: () => () => {}, openResource: () => {}, openTab: () => {}, close: () => {} },
+        },
+      }),
+    } as unknown as ComponentProps<typeof PersonalTodoCanvas>} />
+    const view = render(panel(true))
+    await user.click(screen.getByRole('button', { name: 'New todo' }))
+    await user.type(screen.getByRole('textbox', { name: 'Title' }), '未提交表单')
+    view.rerender(panel(false))
+    act(() => { service.canvas.focusTodo('todo-two', 'session-two', 'tab-two') })
+    view.rerender(panel(true))
+    expect((screen.getByRole('textbox', { name: 'Title' }) as HTMLInputElement).value).toBe('未提交表单')
+    act(() => { service.canvas.focusTodo('todo-two', 'session-one', 'another-pane-tab') })
+    expect((screen.getByRole('textbox', { name: 'Title' }) as HTMLInputElement).value).toBe('未提交表单')
+    expect(service.get).not.toHaveBeenCalled()
+    expect(service.create).not.toHaveBeenCalled()
+    expect(service.start).not.toHaveBeenCalled()
+  })
+
   it('switches active statuses with tabs and history statuses from the more menu', async () => {
     const user = userEvent.setup()
     const service = api([

@@ -6,6 +6,8 @@ export interface PersonalTodoCanvasSnapshot {
   readonly open: boolean
   readonly attentionCount: number
   readonly targetTodoId: string | undefined
+  readonly targetSessionId: string | undefined
+  readonly targetTabId: string | undefined
   readonly navigationRevision: number
 }
 
@@ -15,6 +17,8 @@ export class PersonalTodoCanvasController {
     open: false,
     attentionCount: 0,
     targetTodoId: undefined,
+    targetSessionId: undefined,
+    targetTabId: undefined,
     navigationRevision: 0,
   })
 
@@ -32,12 +36,14 @@ export class PersonalTodoCanvasController {
     this.#set({ ...this.#store.get(), open: true })
   }
 
-  focusTodo(targetTodoId: string): void {
+  focusTodo(targetTodoId: string, targetSessionId?: string, targetTabId?: string): void {
     const snapshot = this.#store.get()
     this.#set({
       ...snapshot,
       open: true,
       targetTodoId,
+      targetSessionId,
+      targetTabId,
       navigationRevision: snapshot.navigationRevision + 1,
     })
   }
@@ -51,6 +57,8 @@ export class PersonalTodoCanvasController {
     if (snapshot.open === current.open
       && snapshot.attentionCount === current.attentionCount
       && snapshot.targetTodoId === current.targetTodoId
+      && snapshot.targetSessionId === current.targetSessionId
+      && snapshot.targetTabId === current.targetTabId
       && snapshot.navigationRevision === current.navigationRevision) return
     this.#store.set(snapshot)
   }
