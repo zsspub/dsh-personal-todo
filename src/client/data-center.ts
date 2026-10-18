@@ -230,9 +230,10 @@ export class PersonalTodoDataCenter {
   readonly #panelRefreshMs: number
   readonly #focusListener = (): void => { void this.refreshSubscribed('all') }
   #panelVisible = false
+  readonly #visiblePanels = new Set<object>()
   #panelTimer: number | undefined
   #disposed = false
-  #openPanel: (() => void) | undefined
+  #openPanel: ((id?: string) => void) | undefined
 
   constructor(remote: PersonalTodoRemoteApi, options: DataCenterOptions = {}) {
     this.#remote = remote
@@ -242,20 +243,25 @@ export class PersonalTodoDataCenter {
     this.#focusTarget?.addEventListener('focus', this.#focusListener)
   }
 
-  setOpenPanel(openPanel: () => void): void {
+  setOpenPanel(openPanel: (id?: string) => void): void {
     this.#openPanel = openPanel
   }
 
   openTodo(id?: string): void {
+    if (this.#disposed) return
+    if (this.#openPanel !== undefined) { this.#openPanel(id); return }
     if (id === undefined) this.canvas.open()
     else this.canvas.focusTodo(id)
-    this.#openPanel?.()
   }
 
-  setPanelVisible(visible: boolean): void {
-    if (this.#disposed || visible === this.#panelVisible) return
-    this.#panelVisible = visible
-    if (visible) {
+  setPanelVisible(visible: boolean, owner: object = this): void {
+    if (this.#disposed) return
+    if (visible) this.#visiblePanels.add(owner)
+    else this.#visiblePanels.delete(owner)
+    const anyVisible = this.#visiblePanels.size > 0
+    if (anyVisible === this.#panelVisible) return
+    this.#panelVisible = anyVisible
+    if (anyVisible) {
       void this.refreshSubscribed('paged')
       this.#panelTimer = this.#focusTarget?.setInterval(() => {
         void this.refreshSubscribed('paged')
@@ -406,6 +412,8 @@ export class PersonalTodoDataCenter {
   dispose(): void {
     if (this.#disposed) return
     this.#disposed = true
+    this.#openPanel = undefined
+    this.#visiblePanels.clear()
     this.#focusTarget?.removeEventListener('focus', this.#focusListener)
     if (this.#panelTimer !== undefined) this.#focusTarget?.clearInterval(this.#panelTimer)
     this.#panelTimer = undefined
