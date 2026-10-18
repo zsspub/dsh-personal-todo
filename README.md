@@ -31,8 +31,8 @@ English | [Chinese](README.zh.md)
 
 ## Requirements
 
-- A DeepSeek Harness Web profile that supports right Sidebar Tabs, `sessionQuery`, and Agent lifecycle notifications; the implementation targets the `0.2.0-rc.2` interfaces.
-- `@deepseek-ai/dsh-client-ui-tool 0.2.0-rc.2` and `@deepseek-ai/cordis ~4.0.4`.
+- A DeepSeek Harness Web profile that supports right Sidebar Tabs, `sessionQuery`, and Agent lifecycle notifications; the implementation targets the `0.2.1-rc.2` interfaces.
+- `@deepseek-ai/dsh-client-ui-tool 0.2.1-rc.2` and `@deepseek-ai/cordis ~4.0.5`.
 - Node.js `^22.19.0 || >=24.0.0`.
 - pnpm `11.7.0` for development.
 

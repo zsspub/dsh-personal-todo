@@ -3,6 +3,7 @@
 import React from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ToolResultNode } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 import { TodoToolCard } from './TodoToolCard.tsx'
 import type { PersonalTodoDataCenter } from './data-center.ts'
 import { NS } from './locales.ts'
@@ -24,6 +25,8 @@ function blockOf(result: PersonalTodoTurnResult): ToolResultNode {
     seq: result.seq,
     time: 0,
     callId: result.callId,
+    name: 'personal_todo_show',
+    args: PartialArguments.fromObject(result.meta.query),
     call: {
       name: 'personal_todo_show',
       argsRaw: JSON.stringify(result.meta.query),
