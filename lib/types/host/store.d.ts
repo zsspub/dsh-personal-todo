@@ -13,6 +13,8 @@ interface TodoStoreDependencies {
     readonly now?: () => number;
     readonly createId?: () => string;
     readonly createEventId?: () => string;
+    /** 每次写入成功提交后调用；用于通知客户端重新读取。 */
+    readonly onCommit?: () => void;
 }
 /** 通过工具与 Remote 调用返回的统一业务错误。 */
 export declare class PersonalTodoError extends Error {
@@ -25,7 +27,10 @@ export declare class TodoStore {
     private readonly now;
     private readonly createId;
     private readonly createEventId;
+    private readonly onCommit;
     private closed;
+    /** 初始化与迁移期间不通知，只通知服务启动后的业务写入。 */
+    private ready;
     constructor(config: TodoStoreConfig, dependencies?: TodoStoreDependencies);
     private initialize;
     private createSchema;
@@ -36,6 +41,8 @@ export declare class TodoStore {
     private assertOpen;
     private migrateV5;
     private transaction;
+    /** 通知已提交的写入；通知失败不能反转已提交的数据。 */
+    private committed;
     private tagsFor;
     private todoFromRow;
     private runFromRow;

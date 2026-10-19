@@ -125,8 +125,6 @@ function remote(initial: Todo[] = []): PersonalTodoRemoteApi & { rows: Todo[] } 
 
 class FocusTarget {
   readonly listeners = new Set<() => void>()
-  readonly intervals = new Map<number, () => void>()
-  #nextInterval = 1
 
   addEventListener(_type: 'focus', listener: () => void): void {
     this.listeners.add(listener)
@@ -134,16 +132,6 @@ class FocusTarget {
 
   removeEventListener(_type: 'focus', listener: () => void): void {
     this.listeners.delete(listener)
-  }
-
-  setInterval(handler: () => void): number {
-    const id = this.#nextInterval++
-    this.intervals.set(id, handler)
-    return id
-  }
-
-  clearInterval(id: number): void {
-    this.intervals.delete(id)
   }
 
   focus(): void {
@@ -298,7 +286,7 @@ describe('PersonalTodoDataCenter', () => {
     center.dispose()
   })
 
-  it('阻止同一待办并发操作，并在释放时取消请求和定时任务', async () => {
+  it('阻止同一待办并发操作，并在释放时取消请求和焦点监听', async () => {
     const target = new FocusTarget()
     let resolveUpdate: ((value: Todo) => void) | undefined
     const service = remote([todo('one')])
@@ -314,26 +302,92 @@ describe('PersonalTodoDataCenter', () => {
     await pending
     expect(center.mutations.get().one).toBeUndefined()
 
-    center.setPanelVisible(true)
-    expect(target.intervals.size).toBe(1)
     center.dispose()
     expect(target.listeners.size).toBe(0)
-    expect(target.intervals.size).toBe(0)
+    vi.mocked(service.list).mockClear()
+    await center.invalidate()
+    expect(service.list).not.toHaveBeenCalled()
   })
 
-  it('后台保留面板的隐藏和释放不会停止前台实例刷新', () => {
-    const target = new FocusTarget()
-    const center = new PersonalTodoDataCenter(remote(), { focusTarget: target })
-    const foreground = {}
-    const background = {}
-    center.setPanelVisible(true, foreground)
-    center.setPanelVisible(true, background)
-    expect(target.intervals.size).toBe(1)
-    center.setPanelVisible(false, background)
-    center.setPanelVisible(false, background)
-    expect(target.intervals.size).toBe(1)
-    center.setPanelVisible(false, foreground)
-    expect(target.intervals.size).toBe(0)
+  it('变更通知刷新已订阅查询和已加载详情，没有订阅时只刷新计数', async () => {
+    const service = remote([todo('one', { title: '旧标题' })])
+    const center = new PersonalTodoDataCenter(service, { focusTarget: new FocusTarget() })
+    vi.mocked(service.list).mockClear()
+    await center.invalidate()
+    expect(service.list).toHaveBeenCalledExactlyOnceWith({ limit: 1 }, expect.any(AbortSignal))
+    expect(center.counts.get().pending).toBe(1)
+
+    const query = center.query({ statuses: ['pending'] }, 'all')
+    const unlisten = query.subscribe(() => undefined)
+    await query.refresh()
+    await center.get('one', new AbortController().signal)
+    service.rows[0] = todo('one', { title: '新标题', revision: 1 })
+    service.rows.push(todo('two'))
+    vi.mocked(service.list).mockClear()
+    vi.mocked(service.get).mockClear()
+    await center.invalidate()
+    expect(service.list).toHaveBeenCalledOnce()
+    expect(service.get).toHaveBeenCalledExactlyOnceWith('one', expect.any(AbortSignal))
+    expect(query.getSnapshot().ids).toEqual(['one', 'two'])
+    expect(center.details.get().one?.todo.title).toBe('新标题')
+    unlisten()
+    center.dispose()
+  })
+
+  it('刷新期间的多次通知合并为一轮补读，且不中止进行中的请求', async () => {
+    const service = remote([todo('one')])
+    const center = new PersonalTodoDataCenter(service, { focusTarget: new FocusTarget() })
+    const query = center.query({ statuses: ['pending'] }, 'paged')
+    const unlisten = query.subscribe(() => undefined)
+    await query.refresh()
+    const list = vi.mocked(service.list)
+    const original = list.getMockImplementation()!
+    const releases: Array<() => void> = []
+    const signals: AbortSignal[] = []
+    list.mockClear()
+    list.mockImplementation((request, signal) => {
+      signals.push(signal)
+      return new Promise<void>(resolve => { releases.push(resolve) }).then(() => original(request, signal))
+    })
+
+    const first = center.invalidate()
+    await vi.waitFor(() => { expect(list).toHaveBeenCalledOnce() })
+    service.rows.push(todo('two'))
+    const second = center.invalidate()
+    const third = center.invalidate()
+    expect(second).toBe(first)
+    expect(third).toBe(first)
+    releases.shift()?.()
+    await vi.waitFor(() => { expect(list).toHaveBeenCalledTimes(2) })
+    expect(signals[0]?.aborted).toBe(false)
+    releases.shift()?.()
+    await first
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(query.getSnapshot().ids).toEqual(['one', 'two'])
+    unlisten()
+    center.dispose()
+  })
+
+  it('通知到达时已在进行的列表请求结束后仍会再读一次', async () => {
+    const service = remote([todo('one')])
+    const center = new PersonalTodoDataCenter(service, { focusTarget: new FocusTarget() })
+    const query = center.query({ statuses: ['pending'] }, 'paged')
+    const unlisten = query.subscribe(() => undefined)
+    const list = vi.mocked(service.list)
+    const original = list.getMockImplementation()!
+    let release!: () => void
+    list.mockImplementationOnce((request, signal) => new Promise<void>(resolve => { release = resolve })
+      .then(() => original(request, signal)))
+    const stale = query.refresh()
+    await vi.waitFor(() => { expect(list).toHaveBeenCalledOnce() })
+    const invalidating = center.invalidate()
+    release()
+    await stale
+    service.rows.push(todo('two'))
+    await invalidating
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(query.getSnapshot().ids).toEqual(['one', 'two'])
+    unlisten()
     center.dispose()
   })
 

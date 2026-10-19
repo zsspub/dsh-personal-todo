@@ -145,7 +145,6 @@ interface AssigneeGroup {
 }
 
 const EMPTY_FORM: FormState = { title: '', notes: '', assignee: '', priority: 'none', dueLocal: '', tags: '' }
-const ACTIVE_REFRESH_MS = 2_000
 const EMPTY_OPEN: PanelOpenSnapshot = { opening: false, error: undefined }
 const EMPTY_ENTITIES: Readonly<Record<string, Todo>> = {}
 const EMPTY_DETAILS: Readonly<Record<string, TodoDetail>> = {}
@@ -235,21 +234,12 @@ export function PersonalTodoTrigger({ wide, t, list, dataCenter, canvas, panelOp
       void countQuery.refresh().catch(() => undefined)
       return unlisten
     }
-    let controller: AbortController | undefined
-    const refresh = (): void => {
-      controller?.abort()
-      controller = new AbortController()
-      void list({ limit: 1 }, controller.signal).then(
-        page => { canvas.setAttentionCount(page.counts.pending + page.counts.inProgress) },
-        () => undefined,
-      )
-    }
-    refresh()
-    const interval = window.setInterval(refresh, ACTIVE_REFRESH_MS)
-    return () => {
-      window.clearInterval(interval)
-      controller?.abort()
-    }
+    const controller = new AbortController()
+    void list({ limit: 1 }, controller.signal).then(
+      page => { canvas.setAttentionCount(page.counts.pending + page.counts.inProgress) },
+      () => undefined,
+    )
+    return () => { controller.abort() }
   }, [canvas, countQuery, list])
 
   const triggerLabel = opening.opening ? t('trigger.opening') : snapshot.attentionCount === 0
@@ -298,7 +288,6 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   }, [t])
   const markdown = (text: string): React.ReactNode => <div className="dsh-personal-todo-markdown"><MarkdownText text={text} {...markdownProps} /></div>
   const { tab } = useTabInfo()
-  const visibilityOwner = useRef({})
   const consumedNavigation = useRef(0)
   const [view, setView] = useState<View>('pending')
   const sharedQuery = useMemo(() => dataCenter?.query({
@@ -425,17 +414,6 @@ export function PersonalTodoCanvas(props: PersonalTodoCanvasProps) {
   useEffect(() => {
     if (tab.visible) void fetchPage(0)
   }, [fetchPage, tab.visible])
-
-  useEffect(() => {
-    if (dataCenter !== undefined) {
-      const owner = visibilityOwner.current
-      dataCenter.setPanelVisible(tab.visible, owner)
-      return () => { dataCenter.setPanelVisible(false, owner) }
-    }
-    if (!tab.visible) return
-    const interval = window.setInterval(() => { void refresh(true) }, ACTIVE_REFRESH_MS)
-    return () => { window.clearInterval(interval) }
-  }, [dataCenter, refresh, tab.visible])
 
   useEffect(() => {
     const id = canvasSnapshot.targetTodoId

@@ -5,7 +5,7 @@ import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import { type TodoSessionController } from './host/orchestrator.ts';
 import { type RuntimeEvent } from './host/runtime.ts';
 import { type JournalMode } from './host/store.ts';
-import type { CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, LiveTodo as Todo, LiveTodoDetail as TodoDetail, TodoIdRequest, LiveTodoListResult as TodoListResult, UpdateTodoRequest, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, SetTodoStatusRequest } from './types.ts';
+import type { CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput, LiveTodo as Todo, LiveTodoDetail as TodoDetail, TodoIdRequest, LiveTodoListResult as TodoListResult, UpdateTodoRequest, ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult, SetTodoStatusRequest, TodoChangeEvent } from './types.ts';
 export type * from './types.ts';
 export { PERSONAL_TODO_SCHEMA_VERSION, PersonalTodoError, TodoStore } from './host/store.ts';
 export type { JournalMode, TodoStoreConfig } from './host/store.ts';
@@ -61,11 +61,17 @@ export declare class PersonalTodoService extends TypertRemoteService {
     private readonly store;
     private readonly orchestrator;
     private readonly runtime;
+    private readonly changeFeed;
     /** @param ctx - 发布 personalTodo Remote 命名空间的 Host 上下文。 @param config - 已校验的数据库配置。 */
     constructor(ctx: Context, config: Config);
     private present;
     /** 查询一页待办；在开始同步 SQLite 操作前检查取消信号。 */
     list(request: ListTodoInput, signal: AbortSignal): Promise<TodoListResult>;
+    /**
+     * 订阅待办变更：首项为 ready，此后待办数据或执行状态变化时推送 changed。
+     * 通知不携带数据；连续变化合并为一项，客户端收到后重新读取。
+     */
+    changes(signal: AbortSignal): AsyncIterable<TodoChangeEvent>;
     exportData(_request: ExportTodoDataRequest, signal: AbortSignal): Promise<ExportTodoDataResult>;
     importData(request: ImportTodoDataRequest, signal: AbortSignal): Promise<ImportTodoDataResult>;
     /** 创建并持久化一条待办。 */

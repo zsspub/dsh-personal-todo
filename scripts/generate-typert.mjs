@@ -62,6 +62,10 @@ export declare function Remote<This extends object, Args extends unknown[], Resu
   method: (this: This, ...args: Args) => Result,
   context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Result>,
 ): void
+export declare function Remote(options: { readonly name?: string; readonly mode?: 'stream' }): <This extends object, Args extends unknown[], Result>(
+  method: (this: This, ...args: Args) => Result,
+  context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Result>,
+) => void
 `)
 await writeFile(join(packageRoot, 'tsconfig.json'), JSON.stringify({
   compilerOptions: {

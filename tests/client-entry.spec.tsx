@@ -33,8 +33,26 @@ async function boot() {
     },
   } as never)
   ctx.provide('locale', { register: () => released, bind: () => (key: string) => key } as never)
-  ctx.provide('remote', { personalTodo: {}, $mount: async () => disposeRemote } as never)
-  ctx.provide('remote.personalTodo', {} as never)
+  const changeSignals: AbortSignal[] = []
+  const changeStream = {
+    dispose: vi.fn(),
+    async *[Symbol.asyncIterator]() {
+      yield { type: 'ready' as const }
+      await new Promise(() => undefined)
+    },
+  }
+  const personalTodo = {
+    changes: vi.fn((signal: AbortSignal) => {
+      changeSignals.push(signal)
+      return changeStream
+    }),
+    list: vi.fn(async () => ({
+      ok: true,
+      value: { todos: [], total: 0, counts: { pending: 2, inProgress: 1, completed: 0, cancelled: 0, archived: 0 }, hasMore: false },
+    })),
+  }
+  ctx.provide('remote', { personalTodo, $mount: async () => disposeRemote } as never)
+  ctx.provide('remote.personalTodo', personalTodo as never)
   ctx.provide('sessions', {} as never)
   ctx.provide('workspaces', {} as never)
   ctx.provide('uiWorkspace', {} as never)
@@ -58,7 +76,7 @@ async function boot() {
   } as never)
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
-  return { ctx, registrations, definitions, closeIn, released, disposeRemote }
+  return { ctx, registrations, definitions, closeIn, released, disposeRemote, personalTodo, changeSignals, changeStream }
 }
 
 describe('待办客户端生命周期', () => {
@@ -81,5 +99,17 @@ describe('待办客户端生命周期', () => {
     expect(h.released).toHaveBeenCalledOnce()
     panel.dataCenter.openTodo('after-disposal')
     expect(open).toHaveBeenCalledTimes(2)
+  })
+
+  it('订阅 Host 变更流，ready 时刷新计数，卸载时停止订阅', async () => {
+    const h = await boot()
+    expect(h.personalTodo.changes).toHaveBeenCalledOnce()
+    const panel = h.registrations.find(entry => entry.name === 'sidebar.footer.action')?.inject?.()
+    await vi.waitFor(() => { expect(panel?.canvas.getSnapshot().attentionCount).toBe(3) })
+    expect(h.personalTodo.list).toHaveBeenCalledWith({ limit: 1 }, expect.any(AbortSignal))
+    expect(h.changeSignals[0]?.aborted).toBe(false)
+    await h.ctx.fiber.dispose()
+    expect(h.changeSignals[0]?.aborted).toBe(true)
+    expect(h.changeStream.dispose).toHaveBeenCalled()
   })
 })
