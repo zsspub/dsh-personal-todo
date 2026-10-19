@@ -600,3 +600,99 @@ describe('Host Remote service and Agent tools', () => {
     await expect(tools.get('personal_todo_import')?.execute({ json: '{}' }, { ...run(), signal: controller.signal })).rejects.toThrow('stop')
   })
 })
+
+describe('Host 变更推送', () => {
+  /** 打开 changes 流并读取首个 ready；返回取下一项、计数及关闭函数。 */
+  async function follow(ctx: Context) {
+    const lifetime = new AbortController()
+    const iterator = ctx.personalTodo.changes(lifetime.signal)[Symbol.asyncIterator]()
+    expect(await iterator.next()).toEqual({ done: false, value: { type: 'ready' } })
+    let pending: Promise<IteratorResult<unknown>> | undefined
+    let received = 0
+    let consumed = 0
+    const pump = (): void => {
+      pending = iterator.next().then(result => {
+        if (result.done !== true) received++
+        return result
+      })
+    }
+    pump()
+    return {
+      /** 等待下一项 changed，并继续监听。 */
+      async changed(): Promise<void> {
+        expect(await pending).toEqual({ done: false, value: { type: 'changed' } })
+        consumed++
+        pump()
+      },
+      /** 让排队中的微任务执行完，再返回上次 changed() 之后新收到的数量。 */
+      async count(): Promise<number> {
+        for (let index = 0; index < 5; index++) await Promise.resolve()
+        return received - consumed
+      },
+      close: () => { lifetime.abort() },
+      pending: () => pending,
+    }
+  }
+
+  it('Remote 写操作和导入在提交后推送 changed，只读调用和失败写入不推送', async () => {
+    const { ctx } = await setup()
+    const feed = await follow(ctx)
+    const todo = await ctx.personalTodo.create({ title: '推送' }, signal)
+    await feed.changed()
+    await ctx.personalTodo.update({ id: todo.id, patch: { title: '推送更新' } }, signal)
+    await feed.changed()
+    await ctx.personalTodo.setStatus({ id: todo.id, status: 'in_progress' }, signal)
+    await feed.changed()
+    await ctx.personalTodo.archive({ id: todo.id }, signal)
+    await feed.changed()
+    await ctx.personalTodo.restore({ id: todo.id }, signal)
+    await feed.changed()
+    await ctx.personalTodo.setStatus({ id: todo.id, status: 'completed' }, signal)
+    await feed.changed()
+    const backup = await ctx.personalTodo.exportData({}, signal)
+    await ctx.personalTodo.delete({ id: todo.id }, signal)
+    await feed.changed()
+    await ctx.personalTodo.importData({ json: backup.json }, signal)
+    await feed.changed()
+
+    await ctx.personalTodo.list({}, signal)
+    await ctx.personalTodo.get({ id: todo.id }, signal)
+    await ctx.personalTodo.exportData({}, signal)
+    expect(() => ctx.personalTodo.update({ id: 'missing', patch: { title: 'x' } }, signal)).toThrow('not found')
+    expect(await feed.count()).toBe(0)
+    feed.close()
+    expect(await feed.pending()).toEqual({ done: true, value: undefined })
+  })
+
+  it('Agent 工具写入、子会话关联和执行状态变化都会推送，重复状态不推送', async () => {
+    const { ctx, sessions, tools } = await setup()
+    const feed = await follow(ctx)
+    const created = await tools.get('personal_todo_add')!.execute({ title: 'Agent 新增' }, run('agent-session')) as { id: string }
+    await feed.changed()
+    const started = await ctx.personalTodo.start({ id: created.id }, signal)
+    await feed.changed()
+    expect(started.executionStatus).toBe('running')
+
+    ctx.emit('session/created', { id: 'child', header: { parentSession: started.primarySessionId } } as never)
+    await feed.changed()
+    ctx.emit('session/created', { id: 'unrelated', header: { parentSession: 'other' } } as never)
+    expect(await feed.count()).toBe(0)
+
+    const agent = sessions.agents.get(started.primarySessionId!)!
+    ctx.emit('session/event', { id: agent.id } as never, { type: 'turn/start' } as never)
+    expect(await feed.count()).toBe(0)
+    ctx.emit('session/event', { id: agent.id } as never, { type: 'turn/end', data: { reason: { kind: 'completed' } } } as never)
+    await feed.changed()
+    ctx.emit('session/event', { id: 'unrelated' } as never, { type: 'turn/start' } as never)
+    expect(await feed.count()).toBe(0)
+    feed.close()
+  })
+
+  it('服务卸载时结束变更流', async () => {
+    const { ctx } = await setup()
+    const feed = await follow(ctx)
+    await ctx.fiber.dispose()
+    contexts.splice(contexts.indexOf(ctx), 1)
+    expect(await feed.pending()).toEqual({ done: true, value: undefined })
+  })
+})

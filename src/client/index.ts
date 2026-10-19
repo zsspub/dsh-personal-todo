@@ -21,6 +21,7 @@ import {
 } from './PersonalTodoPanel.tsx'
 import { TodoToolCard, type TodoToolCardProps } from './TodoToolCard.tsx'
 import { TodoTurnTail, type TodoTurnTailInjected } from './TodoTurnTail.tsx'
+import { followTodoChanges } from './change-stream.ts'
 import { PersonalTodoDataCenter, type PersonalTodoRemoteApi } from './data-center.ts'
 import { PersonalTodoPanelOpener } from './panel-opener.ts'
 import { createTodoInputSource } from './input-source.ts'
@@ -128,6 +129,11 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     }
     const dataCenter = new PersonalTodoDataCenter(remote)
     scope.effect(() => () => { dataCenter.dispose() }, 'personal-todo: data center')
+    // Host 推送变更后刷新；每次（重新）连接的 ready 也会刷新，补齐断开期间漏掉的变化。
+    scope.effect(() => followTodoChanges({
+      open: signal => scope.remote.personalTodo.changes(signal),
+      changed: () => { void dataCenter.invalidate() },
+    }), 'personal-todo: change stream')
     const t = scope.locale.bind(NS)
     const current = scope.uiSession.adapter.current
     const panelOpener = new PersonalTodoPanelOpener({

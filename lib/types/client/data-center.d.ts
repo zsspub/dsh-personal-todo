@@ -53,13 +53,10 @@ export interface PersonalTodoRemoteApi {
 interface FocusTarget {
     addEventListener(type: 'focus', listener: () => void): void;
     removeEventListener(type: 'focus', listener: () => void): void;
-    setInterval(handler: () => void, timeout: number): number;
-    clearInterval(id: number): void;
 }
 interface DataCenterOptions {
     readonly focusTarget?: FocusTarget;
     readonly now?: () => number;
-    readonly panelRefreshMs?: number;
 }
 /** 返回忽略分页参数后的稳定查询键。 */
 export declare function normalizeTodoQueryKey(input: ListTodoInput, mode: TodoQueryMode): string;
@@ -77,7 +74,11 @@ export declare class PersonalTodoDataCenter {
     constructor(remote: PersonalTodoRemoteApi, options?: DataCenterOptions);
     setOpenPanel(openPanel: (id?: string) => void): void;
     openTodo(id?: string): void;
-    setPanelVisible(visible: boolean, owner?: object): void;
+    /**
+     * Host 通知待办可能已变化时，重新读取所有已订阅查询和已加载详情。
+     * 进行中的刷新结束后才开始下一轮，期间到达的多次通知合并为一轮，避免反复中止请求。
+     */
+    invalidate(): Promise<void>;
     query(input: ListTodoInput, mode: TodoQueryMode, seed?: TodoQuerySeed): TodoQueryHandle;
     getEntity(id: string): Todo | undefined;
     seedTodos(todos: readonly Todo[]): void;

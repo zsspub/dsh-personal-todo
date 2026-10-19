@@ -9,7 +9,6 @@ import type {
 import { PersonalTodoCanvasController } from './canvas.ts'
 
 const ALL_PAGE_SIZE = 200
-const PANEL_REFRESH_MS = 2_000
 const DEFAULT_STATUSES = ['in_progress', 'pending'] as const satisfies readonly TodoStatus[]
 const EMPTY_COUNTS: TodoCounts = {
   pending: 0,
@@ -84,14 +83,11 @@ export interface PersonalTodoRemoteApi {
 interface FocusTarget {
   addEventListener(type: 'focus', listener: () => void): void
   removeEventListener(type: 'focus', listener: () => void): void
-  setInterval(handler: () => void, timeout: number): number
-  clearInterval(id: number): void
 }
 
 interface DataCenterOptions {
   readonly focusTarget?: FocusTarget
   readonly now?: () => number
-  readonly panelRefreshMs?: number
 }
 
 interface CanonicalQuery {
@@ -227,11 +223,9 @@ export class PersonalTodoDataCenter {
   readonly #remote: PersonalTodoRemoteApi
   readonly #focusTarget: FocusTarget | undefined
   readonly #now: () => number
-  readonly #panelRefreshMs: number
   readonly #focusListener = (): void => { void this.refreshSubscribed('all') }
-  #panelVisible = false
-  readonly #visiblePanels = new Set<object>()
-  #panelTimer: number | undefined
+  #invalidated = false
+  #invalidating: Promise<void> | undefined
   #disposed = false
   #openPanel: ((id?: string) => void) | undefined
 
@@ -239,7 +233,6 @@ export class PersonalTodoDataCenter {
     this.#remote = remote
     this.#focusTarget = options.focusTarget ?? (typeof window === 'undefined' ? undefined : window)
     this.#now = options.now ?? Date.now
-    this.#panelRefreshMs = options.panelRefreshMs ?? PANEL_REFRESH_MS
     this.#focusTarget?.addEventListener('focus', this.#focusListener)
   }
 
@@ -254,22 +247,24 @@ export class PersonalTodoDataCenter {
     else this.canvas.focusTodo(id)
   }
 
-  setPanelVisible(visible: boolean, owner: object = this): void {
-    if (this.#disposed) return
-    if (visible) this.#visiblePanels.add(owner)
-    else this.#visiblePanels.delete(owner)
-    const anyVisible = this.#visiblePanels.size > 0
-    if (anyVisible === this.#panelVisible) return
-    this.#panelVisible = anyVisible
-    if (anyVisible) {
-      void this.refreshSubscribed('paged')
-      this.#panelTimer = this.#focusTarget?.setInterval(() => {
-        void this.refreshSubscribed('paged')
-      }, this.#panelRefreshMs)
-    } else if (this.#panelTimer !== undefined) {
-      this.#focusTarget?.clearInterval(this.#panelTimer)
-      this.#panelTimer = undefined
-    }
+  /**
+   * Host 通知待办可能已变化时，重新读取所有已订阅查询和已加载详情。
+   * 进行中的刷新结束后才开始下一轮，期间到达的多次通知合并为一轮，避免反复中止请求。
+   */
+  invalidate(): Promise<void> {
+    if (this.#disposed) return Promise.resolve()
+    this.#invalidated = true
+    this.#invalidating ??= (async () => {
+      try {
+        while (this.#invalidated && !this.#disposed) {
+          this.#invalidated = false
+          await this.#refreshLoaded()
+        }
+      } finally {
+        this.#invalidating = undefined
+      }
+    })()
+    return this.#invalidating
   }
 
   query(input: ListTodoInput, mode: TodoQueryMode, seed?: TodoQuerySeed): TodoQueryHandle {
@@ -413,10 +408,7 @@ export class PersonalTodoDataCenter {
     if (this.#disposed) return
     this.#disposed = true
     this.#openPanel = undefined
-    this.#visiblePanels.clear()
     this.#focusTarget?.removeEventListener('focus', this.#focusListener)
-    if (this.#panelTimer !== undefined) this.#focusTarget?.clearInterval(this.#panelTimer)
-    this.#panelTimer = undefined
     for (const controller of this.#controllers) controller.abort()
     this.#controllers.clear()
     for (const record of this.#queries.values()) record.controller?.abort()
@@ -520,6 +512,13 @@ export class PersonalTodoDataCenter {
       offset += page.todos.length
     } while (page.hasMore && page.todos.length > 0)
     return { ...page, todos, hasMore: false }
+  }
+
+  /** 进行中的请求可能早于本次变化，等它结束后再读一次；之后的请求可直接复用。 */
+  async #refreshAfterInflight(record: QueryRecord): Promise<TodoQuerySnapshot> {
+    const pending = record.inflight
+    if (pending !== undefined) await pending.catch(() => undefined)
+    return this.#refreshQuery(record)
   }
 
   async #loadMore(record: QueryRecord): Promise<TodoQuerySnapshot> {
@@ -704,6 +703,15 @@ export class PersonalTodoDataCenter {
   }
 
   async #revalidate(): Promise<void> {
+    await this.#reload(true)
+  }
+
+  /** 变更通知触发的刷新复用进行中的列表请求，不中止它。 */
+  async #refreshLoaded(): Promise<void> {
+    await this.#reload(false)
+  }
+
+  async #reload(replace: boolean): Promise<void> {
     const active = [...this.#queries.values()].filter(record => record.subscribers > 0)
     const detailIds = Object.keys(this.details.get())
     if (active.length === 0) {
@@ -717,7 +725,7 @@ export class PersonalTodoDataCenter {
       }
     }
     await Promise.all([
-      ...active.map(record => this.#refreshQuery(record, true).then(
+      ...active.map(record => (replace ? this.#refreshQuery(record, true) : this.#refreshAfterInflight(record)).then(
         () => undefined,
         () => undefined,
       )),

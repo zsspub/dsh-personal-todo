@@ -13,12 +13,16 @@ export declare class TodoRuntime {
     private readonly agents;
     private readonly query;
     private readonly warn;
+    /** 关联会话的执行状态投影变化时调用。 */
+    private readonly changed;
     private readonly watched;
     private readonly states;
     private readonly reads;
     private readonly retryAfter;
     private disposed;
-    constructor(agents: TodoAgentRegistry, query: TodoSessionQuery, warn: (message: string) => void);
+    constructor(agents: TodoAgentRegistry, query: TodoSessionQuery, warn: (message: string) => void,
+    /** 关联会话的执行状态投影变化时调用。 */
+    changed?: () => void);
     watch(id: string): void;
     notify(id: string, status: TodoLiveStatus): void;
     agentStatus(id: string, status: 'running' | 'idle'): void;

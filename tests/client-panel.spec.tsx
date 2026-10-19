@@ -7,6 +7,7 @@ import {
   PersonalTodoCanvas, PersonalTodoTrigger, type PersonalTodoPanelInjected,
 } from '../src/client/PersonalTodoPanel.tsx'
 import { PersonalTodoCanvasController } from '../src/client/canvas.ts'
+import { PersonalTodoDataCenter, type PersonalTodoRemoteApi } from '../src/client/data-center.ts'
 import { parseTodoBackup, TODO_BACKUP_MAX_BYTES } from '../src/backup.ts'
 import { en, zh } from '../src/client/locales.ts'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -242,6 +243,37 @@ function api(initial: Todo[] = []): PersonalTodoPanelInjected & { readonly rows:
     }),
     openSession: vi.fn(async () => true),
   }
+}
+
+/** 用真实数据中心包装测试 API，验证面板经推送通知刷新的生产路径。 */
+function withDataCenter(service: ReturnType<typeof api>) {
+  const remote: PersonalTodoRemoteApi = {
+    list: service.list, exportData: service.exportData, importData: service.importData,
+    get: service.get, create: service.create, update: service.update, start: service.start,
+    approve: service.approve, setStatus: service.setStatus, stop: service.stop,
+    archive: service.archive, restore: service.restore, delete: service.delete,
+  }
+  const dataCenter = new PersonalTodoDataCenter(remote)
+  return {
+    ...service,
+    rows: service.rows,
+    remote,
+    dataCenter,
+    canvas: dataCenter.canvas,
+    list: dataCenter.list.bind(dataCenter),
+    exportData: dataCenter.exportData.bind(dataCenter),
+    importData: dataCenter.importData.bind(dataCenter),
+    get: dataCenter.get.bind(dataCenter),
+    create: dataCenter.create.bind(dataCenter),
+    update: dataCenter.update.bind(dataCenter),
+    start: dataCenter.start.bind(dataCenter),
+    approve: dataCenter.approve.bind(dataCenter),
+    setStatus: dataCenter.setStatus.bind(dataCenter),
+    stop: dataCenter.stop.bind(dataCenter),
+    archive: dataCenter.archive.bind(dataCenter),
+    restore: dataCenter.restore.bind(dataCenter),
+    delete: dataCenter.delete.bind(dataCenter),
+  } satisfies PersonalTodoPanelInjected & Record<string, unknown>
 }
 
 function TodoSurface({ service, wide = true }: { service: PersonalTodoPanelInjected; wide?: boolean }) {
@@ -672,28 +704,25 @@ describe('PersonalTodoCanvas', () => {
     expect(screen.queryByRole('dialog', { name: 'Personal Todos' })).toBeNull()
   })
 
-  it.each([false, true])('Agent 新增待办后自动更新侧栏和已打开的空面板（打开：%s）', async (open) => {
+  it.each([false, true])('Host 推送变更后自动更新侧栏和已打开的空面板，不定时轮询（打开：%s）', async (open) => {
     vi.useFakeTimers()
-    const service = api()
+    const service = withDataCenter(api())
     if (open) service.canvas.open()
     const rendered = render(<TodoSurface service={service} />)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     service.rows.push(todo({ title: 'Agent 新增待办' }))
-    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    vi.mocked(service.remote.list).mockClear()
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(service.remote.list).not.toHaveBeenCalled()
+
+    await act(async () => { await service.dataCenter.invalidate() })
     if (open) {
       expect(screen.getByRole('tab', { name: 'Pending 1' })).toBeTruthy()
       expect(screen.getByRole('button', { name: /Agent 新增待办/ })).toBeTruthy()
-      await act(async () => { service.canvas.close() })
-      vi.mocked(service.list).mockClear()
-      await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
-      expect(service.list).toHaveBeenCalledTimes(1)
-      expect(service.list).toHaveBeenCalledWith(expect.objectContaining({ limit: 1 }), expect.any(AbortSignal))
     }
     expect(screen.getByRole('button', { name: 'Unfinished todos: 1' })).toBeTruthy()
     rendered.unmount()
-    vi.mocked(service.list).mockClear()
-    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
-    expect(service.list).not.toHaveBeenCalled()
+    service.dataCenter.dispose()
   })
 
   it('只在宿主右栏 Tab 可见时读取内容', async () => {
@@ -1029,26 +1058,27 @@ describe('PersonalTodoCanvas', () => {
     await waitFor(() => expect(service.rows[0]).toMatchObject({ status: 'completed' }))
   })
 
-  it('Agent 空闲后仍留在进行中详情，只刷新运行标识与操作', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
-    const service = api([todo({
+  it('Agent 空闲后由 Host 推送刷新，仍留在进行中详情，只刷新运行标识与操作', async () => {
+    const user = userEvent.setup()
+    const service = withDataCenter(api([todo({
       status: 'in_progress', executionStatus: 'running', primarySessionId: 'session-1',
-    })])
+    })]))
     render(<TodoSurface service={service} />)
     await user.click(screen.getByRole('button', { name: /personal todos/i }))
     await user.click(screen.getByRole('tab', { name: /In progress/ }))
     await user.click(await screen.findByRole('button', { name: /Ship plugin/ }))
+    expect((await screen.findAllByText('Agent · Running')).length).toBeGreaterThan(0)
 
     service.rows[0] = todo({
-      status: 'in_progress', executionStatus: 'idle', primarySessionId: 'session-1',
+      status: 'in_progress', executionStatus: 'idle', primarySessionId: 'session-1', revision: 1,
     })
-    await vi.advanceTimersByTimeAsync(2_000)
+    await act(async () => { await service.dataCenter.invalidate() })
 
     expect(screen.queryByText('No In progress todos.')).toBeNull()
     expect((await screen.findAllByText('Agent · Idle')).length).toBeGreaterThan(0)
     expect(screen.queryByRole('textbox')).toBeNull()
     expect(screen.getAllByRole('button', { name: 'Mark complete' }).length).toBeGreaterThan(0)
+    service.dataCenter.dispose()
   })
 
   it('loads completed history without search or tag filters and deletes from task details', async () => {

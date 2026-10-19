@@ -3,6 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { TodoChangeFeed } from './host/changes.ts'
 import { TodoOrchestrator, type TodoSessionController, type TodoAgentRegistry } from './host/orchestrator.ts'
 import { TodoRuntime, type RuntimeEvent, type TodoSessionQuery } from './host/runtime.ts'
 import { TodoStore, type JournalMode } from './host/store.ts'
@@ -10,7 +11,7 @@ import type {
   CreateTodoInput, DeleteTodoRequest, DeleteTodoResult, ListTodoInput,
   Todo as StoredTodo, LiveTodo as Todo, LiveTodoDetail as TodoDetail, TodoIdRequest, LiveTodoListResult as TodoListResult, UpdateTodoRequest,
   ExportTodoDataRequest, ExportTodoDataResult, ImportTodoDataRequest, ImportTodoDataResult,
-  SetTodoStatusRequest,
+  SetTodoStatusRequest, TodoChangeEvent,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -90,14 +91,16 @@ export class PersonalTodoService extends TypertRemoteService {
   private readonly store: TodoStore
   private readonly orchestrator: TodoOrchestrator
   private readonly runtime: TodoRuntime
+  private readonly changeFeed = new TodoChangeFeed()
 
   /** @param ctx - 发布 personalTodo Remote 命名空间的 Host 上下文。 @param config - 已校验的数据库配置。 */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'personalTodo')
     const resolved = resolveConfig(config)
-    this.store = new TodoStore(resolved)
+    const changed = (): void => { this.changeFeed.notify() }
+    this.store = new TodoStore(resolved, { onCommit: changed })
     const host = ctx as unknown as { agents: TodoAgentRegistry; sessionQuery: TodoSessionQuery }
-    this.runtime = new TodoRuntime(host.agents, host.sessionQuery, message => ctx.logger.warn(message))
+    this.runtime = new TodoRuntime(host.agents, host.sessionQuery, message => ctx.logger.warn(message), changed)
     for (const id of this.store.linkedSessionIds()) this.runtime.watch(id)
     this.orchestrator = new TodoOrchestrator(this.store, ctx.sessionController, resolved, host.agents, this.runtime)
     ctx.on('agent/status', ({ agent, status }) => { this.runtime.agentStatus(agent.id, status) }, { global: true })
@@ -109,6 +112,7 @@ export class PersonalTodoService extends TypertRemoteService {
       if (parentSessionId !== undefined) this.store.linkRelatedSession(parentSessionId, session.id)
     }, { global: true })
     ctx.effect(() => () => {
+      this.changeFeed.dispose()
       this.runtime.dispose()
       this.store.close()
     }, 'personal-todo: dispose runtime and close sqlite')
@@ -129,6 +133,15 @@ export class PersonalTodoService extends TypertRemoteService {
     return Promise.all(page.todos.map(todo => this.present(todo, signal))).then(todos => ({
       ...page, todos,
     }))
+  }
+
+  /**
+   * 订阅待办变更：首项为 ready，此后待办数据或执行状态变化时推送 changed。
+   * 通知不携带数据；连续变化合并为一项，客户端收到后重新读取。
+   */
+  @Remote({ mode: 'stream' })
+  changes(signal: AbortSignal): AsyncIterable<TodoChangeEvent> {
+    return this.changeFeed.follow(signal)
   }
 
   @Remote

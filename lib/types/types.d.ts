@@ -182,3 +182,8 @@ export interface ImportTodoDataResult {
     readonly skipped: number;
     readonly resetToPending: number;
 }
+/** Host 推送的变更通知；不携带数据，客户端收到后重新读取。 */
+export interface TodoChangeEvent {
+    /** ready：连接已就绪，此前的变化可能未送达；changed：待办数据或执行状态可能已变化。 */
+    readonly type: 'ready' | 'changed';
+}

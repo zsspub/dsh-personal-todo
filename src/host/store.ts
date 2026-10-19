@@ -29,6 +29,8 @@ interface TodoStoreDependencies {
   readonly now?: () => number
   readonly createId?: () => string
   readonly createEventId?: () => string
+  /** 每次写入成功提交后调用；用于通知客户端重新读取。 */
+  readonly onCommit?: () => void
 }
 
 interface TodoRow {
@@ -188,7 +190,10 @@ export class TodoStore {
   private readonly now: () => number
   private readonly createId: () => string
   private readonly createEventId: () => string
+  private readonly onCommit: (() => void) | undefined
   private closed = false
+  /** 初始化与迁移期间不通知，只通知服务启动后的业务写入。 */
+  private ready = false
 
   constructor(private readonly config: TodoStoreConfig, dependencies: TodoStoreDependencies = {}) {
     assertDatabasePath(config.databasePath)
@@ -201,6 +206,7 @@ export class TodoStore {
     this.now = dependencies.now ?? Date.now
     this.createId = dependencies.createId ?? randomUUID
     this.createEventId = dependencies.createEventId ?? randomUUID
+    this.onCommit = dependencies.onCommit
     const existed = config.databasePath === ':memory:' || existsSync(config.databasePath)
     if (config.databasePath !== ':memory:') {
       mkdirSync(dirname(config.databasePath), { recursive: true, mode: 0o700 })
@@ -209,6 +215,7 @@ export class TodoStore {
     try {
       if (!existed && config.databasePath !== ':memory:') chmodSync(config.databasePath, 0o600)
       this.initialize()
+      this.ready = true
     } catch (error) {
       this.database.close()
       this.closed = true
@@ -476,12 +483,12 @@ export class TodoStore {
     }
   }
 
-  private transaction<T>(operation: () => T): T {
+  private transaction<T>(operation: () => T, notify = true): T {
     this.database.exec('BEGIN IMMEDIATE')
+    let value: T
     try {
-      const value = operation()
+      value = operation()
       this.database.exec('COMMIT')
-      return value
     } catch (error) {
       try {
         this.database.exec('ROLLBACK')
@@ -489,6 +496,18 @@ export class TodoStore {
         throw new AggregateError([error, rollbackError], 'personal todo transaction and rollback failed')
       }
       throw error
+    }
+    if (notify) this.committed()
+    return value
+  }
+
+  /** 通知已提交的写入；通知失败不能反转已提交的数据。 */
+  private committed(): void {
+    if (!this.ready) return
+    try {
+      this.onCommit?.()
+    } catch {
+      // 变更通知只用于刷新界面，失败时保留已提交结果。
     }
   }
 
@@ -653,7 +672,7 @@ export class TodoStore {
         exportedAt: new Date(this.now()).toISOString(),
         todos: rows.map(row => this.readDetail(row.id, true)),
       }
-    })
+    }, false)
     const json = JSON.stringify(backup, null, 2)
     try {
       assertBackupSize(json)
@@ -902,6 +921,7 @@ export class TodoStore {
       INSERT INTO todo_sessions (todo_id, session_id, role, parent_session_id, created_at)
       VALUES (?, ?, 'related', ?, ?)
     `).run(row.todo_id, row.session_id, row.parent_session_id, row.created_at)
+    this.committed()
     return this.sessionFromRow(row)
   }
 

@@ -21,6 +21,8 @@ export class TodoRuntime {
     private readonly agents: TodoAgentRegistry,
     private readonly query: TodoSessionQuery,
     private readonly warn: (message: string) => void,
+    /** 关联会话的执行状态投影变化时调用。 */
+    private readonly changed: () => void = () => undefined,
   ) {}
 
   watch(id: string): void {
@@ -29,8 +31,11 @@ export class TodoRuntime {
 
   notify(id: string, status: TodoLiveStatus): void {
     if (!this.disposed && this.watched.has(id)) {
+      // Agent 注册表在事件到达前已切换，因此比较本地记录而不是 status() 的计算结果。
+      const changed = this.states.get(id) !== status
       this.states.set(id, status)
       this.retryAfter.delete(id)
+      if (changed) this.changed()
     }
   }
 
