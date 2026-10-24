@@ -31,8 +31,8 @@ read_when:
 
 ## 环境要求
 
-- 支持右侧 Sidebar Tab API、`sessionQuery` 和 Agent 生命周期通知的 DeepSeek Harness Web profile；本次按 `0.2.1-rc.2` 接口实现。
-- Web profile 需要 `@deepseek-ai/dsh-client-ui-tool 0.2.1-rc.2`；项目使用 `@deepseek-ai/cordis ~4.0.5`。
+- 支持右侧 Sidebar Tab API、`sessionQuery` 和 Agent 生命周期通知的 DeepSeek Harness Web profile；本次仅按本机已安装 DSH `0.2.1-rc.3` 及客户端自带 API 适配，不追踪最新版或升级 DSH。
+- Web profile 需要 `@deepseek-ai/dsh-client-ui-tool 0.2.1-rc.3`；项目使用 `@deepseek-ai/cordis ~4.0.5`。
 - Node.js `^22.19.0 || >=24.0.0`。
 - 开发环境使用 pnpm `11.7.0`。
 
@@ -60,7 +60,7 @@ Bundle patch 会挂载 Host 服务与工具，Web manifest 会自动加载 Clien
 
 每个会话保留自己的待办标签、导航和未提交表单，切换会话不会把文件、终端或待办标签搬到其他会话。已访问的待办标签在隐藏、收起、分栏移动及会话切换时保持挂载，显式关闭标签会结束该实例，不提供跨关闭或重启的草稿保存。禁用或卸载插件会取消打开请求、释放订阅并关闭已挂载会话的待办标签；不会为了清除宿主保存的历史布局元数据而打开历史会话。
 
-插件使用 `sessions.create`、Workspace 快照、`uiWorkspace.openSession`、`sidebarRight.mounted` 和 tab 的 `keepMounted` 接口，接口基线为 `0.2.0-rc.2`。本机桌面 GUI 的 `0.2.1-rc.2` 实际验收须在安装本次插件产物后单独完成；启动另一个开发服务器不代表桌面 GUI 已更新。宿主代码和应用安装产物无需修改。
+插件使用 `sessions.create`、Workspace 快照、`uiWorkspace.openSession`、`sidebarRight.mounted` 和 tab 的 `keepMounted` 接口，接口基线为本机 DSH `0.2.1-rc.3`。该版本的实际桌面 GUI 验收须在安装本次插件产物后单独完成；启动另一个开发服务器不代表桌面 GUI 已更新。宿主代码和应用安装产物无需修改。
 
 ## Agent 工具
 

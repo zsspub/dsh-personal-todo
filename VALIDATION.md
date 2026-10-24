@@ -44,3 +44,13 @@
 - 首次使用 DSH 自带 Node.js `24.21.0` 运行构建时，macOS 因原生构建模块与 Node 签名 Team ID 不同拒绝加载；改用已有的 Node.js `24.13.0` 后通过，未修改系统安全设置或依赖版本。
 - 上游 primitives 包缺失 source map、Vitest 配置弃用及 SQLite 实验性提示仍存在，不影响上述检查结果。
 - 此次仅完成代码整合与仓库检查，未安装或重载插件，未验证当前桌面 GUI；自动创建普通空会话的实现边界不变，不能视为真正全局右侧宿主能力已经实现。
+
+## 本机 DSH 兼容性验证（2026-10-24）
+
+- 原基准：从 `origin/main` fetch 的 `4a2684b9d73d7a51c43535dd5e808f3de477dd65`；分支为 `codex/d0ef3379-0d2c-4db5-b60a-69415ef0b26d`，工作目录为 `/Users/bytedance/.honey/worktrees/d0ef3379-0d2c-4db5-b60a-69415ef0b26d`。源工作目录已有修改未纳入。
+- 执行 `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh --version`，返回 `0.2.1-rc.3`。只读核对该应用 `app.asar` 内的包版本及客户端 API，包括 Session 导航、右侧 tab 保留、回合尾部与工具卡片插槽；未追踪最新版或升级 DSH。
+- DSH peer/dev 依赖精确同步为 `0.2.1-rc.3`，Cordis 仍为 `4.0.5`；非 DSH 直接依赖和锁定包解析未变。现有业务代码及接口无需改动；重建后只有 `lib/client.js.map` 中两处依赖路径版本变化，运行时代码未变。
+- 默认镜像未同步所需版本，使用命令级 `--registry=https://registry.npmjs.org` 完成 `pnpm install --lockfile-only`，随后 `pnpm install --frozen-lockfile` 通过；未写入 registry 配置。
+- Node.js `24.22.0`、pnpm `11.7.0` 下，`pnpm check` 通过：Host/Client 构建、类型检查、lint、13 个文件的 210 项测试及打包预览全部成功；语句覆盖率为 `96.38%`。上游 primitives 缺失 source map 和 Vitest 配置弃用提示仍存在，未导致测试跳过或失败。
+- 明确暂存本次产物后，串行执行 `pnpm artifacts:check` 返回 0，重建的 `lib/` 与索引一致，确认产物可重现；未修改或绕过检查。
+- 本阶段没有提交、推送或安装插件，未执行当前桌面 GUI 验收；上述结果仅代表本机版本 API 核对、编译和自动化检查通过。
